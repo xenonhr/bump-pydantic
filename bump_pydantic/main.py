@@ -90,6 +90,9 @@ def main(
     metadata_manager = FullRepoManager(".", files, providers=providers)  # type: ignore[arg-type]
     metadata_manager.resolve_cache()
 
+    count_errors = 0
+    log_fp = log_file.open("a+", encoding="utf8")
+
     scratch: dict[str, Any] = {}
     with Progress(*Progress.get_default_columns(), transient=True) as progress:
         task = progress.add_task(description="Looking for Pydantic Models...", total=len(files))
@@ -104,7 +107,12 @@ def main(
 
             # Visitor logic
             code = Path(filename).read_text(encoding="utf8")
-            module = cst.parse_module(code)
+            try:
+                module = cst.parse_module(code)
+            except Exception:
+                count_errors += 1
+                log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
+                continue
             module_and_package = calculate_module_and_package(str(package), filename)
 
             context = CodemodContext(
@@ -126,11 +134,9 @@ def main(
 
     codemods = gather_codemods(disabled=disable)
 
-    log_fp = log_file.open("a+", encoding="utf8")
     partial_run_codemods = functools.partial(run_codemods, codemods, metadata_manager, scratch, package, diff)
     with Progress(*Progress.get_default_columns(), transient=True) as progress:
         task = progress.add_task(description="Executing codemods...", total=len(files))
-        count_errors = 0
         difflines: List[List[str]] = []
         with multiprocessing.Pool(processes=processes) as pool:
             for error, _difflines in pool.imap_unordered(partial_run_codemods, files):
