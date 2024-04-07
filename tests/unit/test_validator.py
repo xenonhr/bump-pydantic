@@ -390,6 +390,93 @@ class TestValidatorCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_replace_validator_with_always(self) -> None:
+        before = """
+        import pydantic
+        from pydantic import BaseModel, Field
+
+        class Potato(BaseModel):
+            response_format: str
+            text: str = "hi"
+            foo: Annotated[str, Field(max_length=256)]
+            bar: str = pydantic.Field(default=None)
+            baz: int = Field(gt=0, lt=10)
+            not_always: str
+
+            @validator("response_format", pre=True, always=True)
+            def default_response_format(cls, v):
+                x: int
+                if v is None:
+                    v = "foo"
+                return v
+
+            @validator("text", pre=True, always=True)
+            def validate_text(cls, v):
+                pass
+
+            @validator("foo", pre=True, always=True)
+            def validate_foo(cls, v):
+                pass
+
+            @validator("bar", pre=True, always=True)
+            def validate_bar(cls, v):
+                pass
+
+            @validator("baz", pre=True, always=True)
+            def validate_baz(cls, v):
+                pass
+
+            @validator("not_always", pre=True)
+            def validate_not_always(cls, v):
+                pass
+        """
+        after = """
+        import pydantic
+        from pydantic import field_validator, BaseModel, Field
+
+        class Potato(BaseModel):
+            response_format: Annotated[str, Field(validate_default=True)]
+            text: Annotated[str, Field(validate_default=True)] = "hi"
+            foo: Annotated[str, Field(max_length=256, validate_default=True)]
+            bar: str = pydantic.Field(default=None, validate_default=True)
+            baz: int = Field(gt=0, lt=10, validate_default=True)
+            not_always: str
+
+            @field_validator("response_format", mode="before")
+            @classmethod
+            def default_response_format(cls, v):
+                x: int
+                if v is None:
+                    v = "foo"
+                return v
+
+            @field_validator("text", mode="before")
+            @classmethod
+            def validate_text(cls, v):
+                pass
+
+            @field_validator("foo", mode="before")
+            @classmethod
+            def validate_foo(cls, v):
+                pass
+
+            @field_validator("bar", mode="before")
+            @classmethod
+            def validate_bar(cls, v):
+                pass
+
+            @field_validator("baz", mode="before")
+            @classmethod
+            def validate_baz(cls, v):
+                pass
+
+            @field_validator("not_always", mode="before")
+            @classmethod
+            def validate_not_always(cls, v):
+                pass
+        """
+        self.assertCodemod(before, after)
+
     @pytest.mark.xfail(reason="Not implemented yet")
     def test_import_pydantic(self) -> None:
         before = """

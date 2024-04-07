@@ -1,10 +1,12 @@
-from typing import List
+from collections import defaultdict
+from typing import List, Sequence
 
 import libcst as cst
 from libcst import matchers as m
 from libcst._nodes.module import Module
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor, RemoveImportsVisitor
+from libcst.metadata import QualifiedNameProvider
 
 PREFIX_COMMENT = "# TODO[pydantic]: "
 REFACTOR_COMMENT = (
@@ -67,6 +69,9 @@ ASSIGN_TO_VALUES = (
 
 
 class ValidatorCodemod(VisitorBasedCodemodCommand):
+
+    METADATA_DEPENDENCIES = (QualifiedNameProvider,)
+
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
 
@@ -76,6 +81,9 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         self._should_replace_values_param = False
         self._has_comment = False
         self._args: List[cst.Arg] = []
+        self._fields_needing_validate_default = defaultdict[cst.ClassDef, set[str]](set)
+        self._class_stack: list[cst.ClassDef] = []
+        self._need_field_import = False
 
     @m.visit(IMPORT_VALIDATOR)
     def visit_import_validator(self, node: cst.CSTNode) -> None:
@@ -85,23 +93,41 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
     def leave_Module(self, original_node: Module, updated_node: Module) -> Module:
         self._import_pydantic_validator = False
         self._import_pydantic_root_validator = False
+        if self._need_field_import:
+            AddImportsVisitor.add_needed_import(context=self.context, module="pydantic", obj="Field")
+            self._need_field_import = False
         return updated_node
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        self._class_stack.append(node)
 
     @m.visit(VALIDATOR_DECORATOR | ROOT_VALIDATOR_DECORATOR)
     def visit_validator_decorator(self, node: cst.Decorator) -> None:
         if m.matches(node.decorator, m.Call()):
-            for arg in node.decorator.args:  # type: ignore[attr-defined]
+            field_names: list[str] = []
+            always = False
+            assert isinstance(node.decorator, cst.Call)
+            for arg in node.decorator.args:
                 pre_false = m.Arg(keyword=m.Name("pre"), value=m.Name("False"))
                 pre_true = m.Arg(keyword=m.Name("pre"), value=m.Name("True"))
                 if m.matches(arg, m.Arg(keyword=m.Name("allow_reuse")) | pre_false):
                     continue
                 if m.matches(arg, pre_true):
                     self._args.append(arg.with_changes(keyword=cst.Name("mode"), value=cst.SimpleString('"before"')))
+                elif m.matches(arg, m.Arg(keyword=m.Name("always"), value=m.Name("True"))):
+                    always = True
                 elif m.matches(arg.keyword, m.Name(value=m.MatchIfTrue(lambda v: v in ("each_item", "always")))):
                     self._should_add_comment = True
                 else:
+                    if isinstance(arg.value, cst.SimpleString) and isinstance(field_name := arg.value.evaluated_value, str):
+                        field_names.append(field_name)
                     # The `check_fields` kw-argument and all positional arguments can be just copied.
                     self._args.append(arg)
+            if always:
+                if field_names and self._class_stack:
+                    self._fields_needing_validate_default[self._class_stack[-1]].update(field_names)
+                else:
+                    self._should_add_comment = True
         else:
             """This only happens for `@validator`, not with `@validator()`. The parenthesis makes it not be a `Call`"""
             self._should_add_comment = True
@@ -168,6 +194,74 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             classmethod_decorator = cst.Decorator(decorator=cst.Name("classmethod"))
             updated_node = updated_node.with_changes(decorators=[*updated_node.decorators, classmethod_decorator])
         return updated_node
+
+    def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
+        if self._class_stack and self._class_stack[-1] == original_node:
+            self._class_stack.pop()
+            field_names = self._fields_needing_validate_default[original_node]
+            if field_names:
+                updated_node = self._add_validate_default(original_node, updated_node, field_names)
+                del self._fields_needing_validate_default[original_node]
+
+        return updated_node
+
+    def _add_validate_default(self, original_node: cst.ClassDef, updated_node: cst.ClassDef, field_names:set[str]) -> cst.ClassDef:
+        field_matcher = m.AnnAssign(target=m.OneOf(*(m.Name(name) for name in field_names)))
+
+        replacements: list[tuple[int, int, cst.BaseSmallStatement]] = []
+        for i, statement in enumerate(original_node.body.body):
+            if isinstance(statement, cst.SimpleStatementLine):
+                for j, small_stat in enumerate(statement.body):
+                    if m.matches(small_stat, field_matcher):
+                        new_small_stat = self._add_validate_default_to_field(cst.ensure_type(small_stat, cst.AnnAssign))
+                        replacements.append((i, j, new_small_stat))
+
+        for i, j, new_small_stat in replacements:
+            small_stat = cst.ensure_type(updated_node.body.body[i], cst.SimpleStatementLine).body[j]
+            updated_node = cst.ensure_type(updated_node.deep_replace(small_stat, new_small_stat), cst.ClassDef)
+
+        return updated_node
+
+    def _add_validate_default_to_field(self, ann_assign: cst.AnnAssign) -> cst.AnnAssign:
+        pyd_field_name_matcher = m.MatchMetadataIfTrue(
+            QualifiedNameProvider,
+            lambda qualnames: any(
+                qualname.name == "pydantic.Field"
+                for qualname in qualnames
+            ),
+        )
+        pyd_field_matcher = m.Call(func=(pyd_field_name_matcher | m.Attribute(attr=pyd_field_name_matcher)))
+        validate_default_true = cst.Arg(
+            keyword=cst.Name(value="validate_default"),
+            value=cst.Name(value="True"),
+            equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace("")))
+
+        pyd_fields: Sequence[cst.CSTNode] = m.findall(ann_assign, pyd_field_matcher, metadata_resolver=self.context.wrapper)
+        if pyd_fields:
+            # There is already a pydantic.Field, add validate_default=True to it.
+            pyd_field = cst.ensure_type(pyd_fields[0], cst.Call)
+            new_pyd_field = pyd_field.with_changes(args=[*pyd_field.args, validate_default_true])
+            return cst.ensure_type(ann_assign.deep_replace(pyd_field, new_pyd_field), cst.AnnAssign)
+
+        # No pydantic.Field found, let's add it
+        self._need_field_import = True
+        pyd_field = cst.Call(func=cst.Name("Field"), args=[validate_default_true])
+
+        annotation = ann_assign.annotation.annotation
+        if m.matches(annotation, m.Subscript(value=m.Name("Annotated"))):
+            # There is already an annotation with Annotated, let's add the Field to it.
+            new_annotation = annotation.with_changes(slice=[cst.SubscriptElement(slice=cst.Index(value=pyd_field))])
+        else:
+            # We need to wrap it into Annotated
+            AddImportsVisitor.add_needed_import(self.context, "typing", "Annotated")
+            new_annotation = cst.Subscript(
+                value=cst.Name("Annotated"),
+                slice=[
+                    cst.SubscriptElement(slice=cst.Index(value=annotation)),
+                    cst.SubscriptElement(slice=cst.Index(value=pyd_field)),
+                ],
+            )
+        return cst.ensure_type(ann_assign.deep_replace(annotation, new_annotation), cst.AnnAssign)
 
     def _decorator_with_leading_comment(self, node: cst.Decorator, comment: str) -> cst.Decorator:
         return node.with_changes(
