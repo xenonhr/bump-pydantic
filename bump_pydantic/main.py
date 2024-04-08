@@ -113,32 +113,32 @@ def main(
             code = Path(filename).read_text(encoding="utf8")
             try:
                 module = cst.parse_module(code)
+                module_and_package = calculate_module_and_package(str(package), filename)
+
+                context = CodemodContext(
+                    metadata_manager=metadata_manager,
+                    filename=filename,
+                    full_module_name=module_and_package.name,
+                    full_package_name=module_and_package.package,
+                    scratch=scratch,
+                )
+                visitor = ClassDefVisitor(context=context)
+                visitor.transform_module(module)
+
+                ormar_visitor = OrmarClassDefVisitor(context=context)
+                ormar_visitor.transform_module(module)
+
+                ormar_visitor = OrmarMetaClassDefVisitor(context=context)
+                ormar_visitor.transform_module(module)
+
+                # Queue logic
+                next_file = visitor.next_file(visited)
+                if next_file is not None:
+                    queue.appendleft(next_file)
             except Exception:
                 count_errors += 1
                 log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
                 continue
-            module_and_package = calculate_module_and_package(str(package), filename)
-
-            context = CodemodContext(
-                metadata_manager=metadata_manager,
-                filename=filename,
-                full_module_name=module_and_package.name,
-                full_package_name=module_and_package.package,
-                scratch=scratch,
-            )
-            visitor = ClassDefVisitor(context=context)
-            visitor.transform_module(module)
-
-            ormar_visitor = OrmarClassDefVisitor(context=context)
-            ormar_visitor.transform_module(module)
-
-            ormar_visitor = OrmarMetaClassDefVisitor(context=context)
-            ormar_visitor.transform_module(module)
-
-            # Queue logic
-            next_file = visitor.next_file(visited)
-            if next_file is not None:
-                queue.appendleft(next_file)
 
     start_time = time.time()
 
