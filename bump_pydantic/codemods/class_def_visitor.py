@@ -115,6 +115,19 @@ class OrmarClassDefVisitor(ClassDefVisitor):
         super().__init__(context)
 
 
+class OrmarMetaClassDefVisitor(ClassDefVisitor):
+    BASE_MODEL_CONTEXT_KEY = "ormar_model_meta_cls"
+    NO_BASE_MODEL_CONTEXT_KEY = "no_ormar_model_meta_cls"
+    CLS_CONTEXT_KEY = "ormar_unknown_meta_cls"
+
+    def __init__(self, context: CodemodContext) -> None:
+        context.scratch.setdefault(
+            self.BASE_MODEL_CONTEXT_KEY,
+            {"ormar.ModelMeta"},
+        )
+        super().__init__(context)
+
+
 if __name__ == "__main__":
     import os
     import textwrap

@@ -20,7 +20,11 @@ from typing_extensions import ParamSpec
 
 from bump_pydantic import __version__
 from bump_pydantic.codemods import Rule, gather_codemods
-from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor, OrmarClassDefVisitor
+from bump_pydantic.codemods.class_def_visitor import (
+    ClassDefVisitor,
+    OrmarClassDefVisitor,
+    OrmarMetaClassDefVisitor,
+)
 from bump_pydantic.glob_helpers import match_glob
 
 app = Typer(invoke_without_command=True, add_completion=False)
@@ -126,6 +130,9 @@ def main(
             visitor.transform_module(module)
 
             ormar_visitor = OrmarClassDefVisitor(context=context)
+            ormar_visitor.transform_module(module)
+
+            ormar_visitor = OrmarMetaClassDefVisitor(context=context)
             ormar_visitor.transform_module(module)
 
             # Queue logic
