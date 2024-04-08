@@ -49,7 +49,7 @@ class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
             return None
 
         fqn: QualifiedName = next(iter(fqn_set))  # type: ignore
-        if fqn.name in self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY]:
+        if fqn.name in self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members:
             self.inside_base_model = True
 
     def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:

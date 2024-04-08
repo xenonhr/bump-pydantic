@@ -33,8 +33,8 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
         self._class_stack: list[ClassInfo] = []
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        ormar_model_bases = self.context.scratch[OrmarClassDefVisitor.BASE_MODEL_CONTEXT_KEY]
-        ormar_meta_bases = self.context.scratch[OrmarMetaClassDefVisitor.BASE_MODEL_CONTEXT_KEY]
+        ormar_model_bases = self.context.scratch[OrmarClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+        ormar_meta_bases = self.context.scratch[OrmarMetaClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
         fqn_set = cast(Collection[QualifiedName], self.get_metadata(FullyQualifiedNameProvider, node))
         self._class_stack.append(ClassInfo(
             node,
