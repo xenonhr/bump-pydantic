@@ -8,6 +8,7 @@ from bump_pydantic.codemods.add_default_none import AddDefaultNoneCommand
 from bump_pydantic.codemods.con_func import ConFuncCallCommand
 from bump_pydantic.codemods.custom_types import CustomTypeCodemod
 from bump_pydantic.codemods.field import FieldCodemod
+from bump_pydantic.codemods.ormar import OrmarCodemod
 from bump_pydantic.codemods.replace_config import ReplaceConfigCodemod
 from bump_pydantic.codemods.replace_generic_model import ReplaceGenericModelCommand
 from bump_pydantic.codemods.replace_imports import ReplaceImportsCodemod
@@ -34,6 +35,8 @@ class Rule(str, Enum):
     """Replace `con*` functions by `Annotated` versions."""
     BP009 = "BP009"
     """Mark Pydantic "protocol" functions in custom types with proper TODOs."""
+    BO001 = "BO001"
+    """Update Ormar models."""
 
 
 def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]:
@@ -66,6 +69,9 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
 
     if Rule.BP009 not in disabled:
         codemods.append(CustomTypeCodemod)
+
+    if Rule.BO001 not in disabled:
+        codemods.append(OrmarCodemod)
 
     # Those codemods need to be the last ones.
     codemods.extend([RemoveImportsVisitor, AddImportsVisitor])

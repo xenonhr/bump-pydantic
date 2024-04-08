@@ -102,6 +102,19 @@ class ClassDefVisitor(VisitorBasedCodemodCommand):
         return None
 
 
+class OrmarClassDefVisitor(ClassDefVisitor):
+    BASE_MODEL_CONTEXT_KEY = "ormar_model_cls"
+    NO_BASE_MODEL_CONTEXT_KEY = "no_ormar_model_cls"
+    CLS_CONTEXT_KEY = "ormar_unknown_cls"
+
+    def __init__(self, context: CodemodContext) -> None:
+        context.scratch.setdefault(
+            self.BASE_MODEL_CONTEXT_KEY,
+            {"ormar.Model"},
+        )
+        super().__init__(context)
+
+
 if __name__ == "__main__":
     import os
     import textwrap
