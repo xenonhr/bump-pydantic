@@ -34,7 +34,7 @@ entrypoint = functools.partial(app, windows_expand_args=False)
 P = ParamSpec("P")
 T = TypeVar("T")
 
-DEFAULT_IGNORES = [".venv/**", ".tox/**"]
+DEFAULT_IGNORES = [".venv/**", ".tox/**", ".git/**"]
 
 processes = os.cpu_count()
 # Windows has a limit of 61 processes. See https://github.com/python/cpython/issues/89240.
