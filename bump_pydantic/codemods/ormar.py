@@ -11,7 +11,7 @@ from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor
 from libcst.metadata import FullyQualifiedNameProvider, QualifiedName
 
-from bump_pydantic.codemods.class_def_visitor import OrmarClassDefVisitor, OrmarMetaClassDefVisitor
+from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
 META_LINE_MATCHER = m.SimpleStatementLine(body=[m.SaveMatchedNode(m.ZeroOrMore(m.Assign(targets=[m.AssignTarget(m.Name())])), "assigns")])
 META_BODY_MATCHER = m.IndentedBlock(body=[m.ZeroOrMore(META_LINE_MATCHER)])
@@ -33,8 +33,8 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
         self._class_stack: list[ClassInfo] = []
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        ormar_model_bases = self.context.scratch[OrmarClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
-        ormar_meta_bases = self.context.scratch[OrmarMetaClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+        ormar_model_bases = self.context.scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY].known_members
+        ormar_meta_bases = self.context.scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY].known_members
         fqn_set = cast(Collection[QualifiedName], self.get_metadata(FullyQualifiedNameProvider, node))
         self._class_stack.append(ClassInfo(
             node,

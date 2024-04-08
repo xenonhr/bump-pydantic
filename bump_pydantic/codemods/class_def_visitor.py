@@ -54,15 +54,23 @@ class ClassDefVisitor(VisitorBasedCodemodCommand):
     METADATA_DEPENDENCIES = {FullyQualifiedNameProvider, QualifiedNameProvider}
 
     BASE_MODEL_CONTEXT_KEY = "base_model_cls"
+    ORMAR_MODEL_CONTEXT_KEY = "ormar_model_cls"
+    ORMAR_META_CONTEXT_KEY = "ormar_model_meta_cls"
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
 
-        self.models: ClassCategory = self.context.scratch.setdefault(self.BASE_MODEL_CONTEXT_KEY,
-            ClassCategory(known_members={"pydantic.BaseModel", "pydantic.main.BaseModel"}))
+        self.categories = list[ClassCategory]()
+        self.categories.append(self.context.scratch.setdefault(self.BASE_MODEL_CONTEXT_KEY,
+            ClassCategory(known_members={"pydantic.BaseModel", "pydantic.main.BaseModel"})))
+        self.categories.append(self.context.scratch.setdefault(self.ORMAR_MODEL_CONTEXT_KEY,
+            ClassCategory(known_members={"ormar.Model"})))
+        self.categories.append(self.context.scratch.setdefault(self.ORMAR_META_CONTEXT_KEY,
+            ClassCategory(known_members={"ormar.ModelMeta"})))
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        self.update_membership(node, self.models)
+        for category in self.categories:
+            self.update_membership(node, category)
 
     def update_membership(self, node: cst.ClassDef, category: ClassCategory) -> None:
         fqn_set = self.get_metadata(FullyQualifiedNameProvider, node)
@@ -99,28 +107,6 @@ class ClassDefVisitor(VisitorBasedCodemodCommand):
     # TODO: Implement this if needed...
     def next_file(self, visited: set[str]) -> str | None:
         return None
-
-
-class OrmarClassDefVisitor(ClassDefVisitor):
-    BASE_MODEL_CONTEXT_KEY = "ormar_model_cls"
-
-    def __init__(self, context: CodemodContext) -> None:
-        context.scratch.setdefault(
-            self.BASE_MODEL_CONTEXT_KEY,
-            ClassCategory(known_members={"ormar.Model"}),
-        )
-        super().__init__(context)
-
-
-class OrmarMetaClassDefVisitor(ClassDefVisitor):
-    BASE_MODEL_CONTEXT_KEY = "ormar_model_meta_cls"
-
-    def __init__(self, context: CodemodContext) -> None:
-        context.scratch.setdefault(
-            self.BASE_MODEL_CONTEXT_KEY,
-            ClassCategory(known_members={"ormar.ModelMeta"}),
-        )
-        super().__init__(context)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,7 @@ from libcst.codemod import CodemodContext, CodemodTest
 from libcst.metadata import FullRepoManager, FullyQualifiedNameProvider, ScopeProvider
 
 from bump_pydantic.codemods import OrmarCodemod
-from bump_pydantic.codemods.class_def_visitor import (
-    ClassCategory,
-    OrmarClassDefVisitor,
-    OrmarMetaClassDefVisitor,
-)
+from bump_pydantic.codemods.class_def_visitor import ClassCategory, ClassDefVisitor
 from bump_pydantic.codemods.ormar import OrmarCodemod
 
 
@@ -28,8 +24,8 @@ class TestOrmarCodemod(CodemodTest):
             scratch=scratch,
         )
 
-        scratch[OrmarClassDefVisitor.BASE_MODEL_CONTEXT_KEY] = ClassCategory(known_members={"ormar.Model", "foo.Album"})
-        scratch[OrmarMetaClassDefVisitor.BASE_MODEL_CONTEXT_KEY] = ClassCategory(known_members={"ormar.ModelMeta", "foo.BaseMeta"})
+        scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY] = ClassCategory(known_members={"ormar.Model", "foo.Album"})
+        scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY] = ClassCategory(known_members={"ormar.ModelMeta", "foo.BaseMeta"})
         self.context = context
         return super().setUp()
 
