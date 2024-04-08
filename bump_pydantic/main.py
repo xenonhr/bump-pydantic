@@ -91,7 +91,7 @@ def main(
         raise Exit()
 
     providers = {FullyQualifiedNameProvider, ScopeProvider}
-    metadata_manager = FullRepoManager(str(package), files, providers=providers)  # type: ignore[arg-type]
+    metadata_manager = FullRepoManager(".", files, providers=providers)  # type: ignore[arg-type]
     metadata_manager.resolve_cache()
 
     count_errors = 0
