@@ -7,7 +7,17 @@ from libcst.metadata import FullyQualifiedNameProvider, TypeInferenceProvider
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
-JSON_METHOD_CALL=m.Call(func=m.Attribute(attr=m.Name("json")))
+METHOD_MAP = {
+    "construct": "model_construct",
+    "copy": "model_copy",
+    "dict": "model_dump",
+    "json_schema": "model_json_schema",
+    "json": "model_dump_json",
+    "parse_obj": "model_validate",
+    "update_forward_refs": "model_rebuild",
+}
+
+MODEL_METHOD_CALL=m.Call(func=m.Attribute(attr=m.OneOf(*(m.Name(method) for method in METHOD_MAP.keys()))))
 
 
 class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
@@ -21,9 +31,11 @@ class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
         self.should_add_comment = False
         self.node_stack = list[cst.CSTNode]()
 
-    @m.leave(JSON_METHOD_CALL)
+    @m.leave(MODEL_METHOD_CALL)
     def leave_json_call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
-        obj = cst.ensure_type(original_node.func, cst.Attribute).value
+        func_attr: cst.Attribute = cst.ensure_type(original_node.func, cst.Attribute)
+        obj = func_attr.value
+        old_method = func_attr.attr.value
         fqn = self.get_metadata(TypeInferenceProvider, obj, None)
         if not fqn:
             # We don't know what this is! Warn?
@@ -31,7 +43,7 @@ class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
         if fqn in self.pydantic_model_bases:
             return updated_node.with_changes(
                 func=cst.Attribute(
-                    attr=cst.Name("model_dump_json"),
+                    attr=cst.Name(METHOD_MAP[old_method]),
                     value=updated_node.func.value
                 )
             )
