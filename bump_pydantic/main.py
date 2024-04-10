@@ -1,8 +1,10 @@
 import difflib
 import functools
+import json
 import multiprocessing
 import os
 import platform
+import subprocess
 import time
 import traceback
 from collections import deque
@@ -94,41 +96,18 @@ def main(
     log_fp = log_file.open("a+", encoding="utf8")
 
     scratch: dict[str, Any] = {}
-    with Progress(*Progress.get_default_columns(), transient=True) as progress:
-        task = progress.add_task(description="Looking for Pydantic Models...", total=len(files))
-        queue = deque(files)
-        visited: Set[str] = set()
-
-        while queue:
-            # Queue logic
-            filename = queue.popleft()
-            visited.add(filename)
-            progress.advance(task)
-
-            # Visitor logic
-            code = Path(filename).read_text(encoding="utf8")
-            try:
-                module = cst.parse_module(code)
-                module_and_package = calculate_module_and_package(str(package), filename)
-
-                context = CodemodContext(
-                    metadata_manager=metadata_manager,
-                    filename=filename,
-                    full_module_name=module_and_package.name,
-                    full_package_name=module_and_package.package,
-                    scratch=scratch,
-                )
-                visitor = ClassDefVisitor(context=context)
-                visitor.transform_module(module)
-
-                # Queue logic
-                next_file = visitor.next_file(visited)
-                if next_file is not None:
-                    queue.appendleft(next_file)
-            except Exception:
-                count_errors += 1
-                log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
-                continue
+    if (package / ".pyre_configuration").exists():
+        console.log("Found .pyre_configuration file. Using Pyre to find class families.")
+        (scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY],
+        scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY],
+        scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY]) = find_class_families_using_pyre([
+            {"pydantic.BaseModel", "pydantic.main.BaseModel"},
+            {"ormar.Model", "ormar.models.model.Model"},
+            {"ormar.ModelMeta", "ormar.models.metaclass.ModelMeta"}])
+    else:
+        for error in scan_for_classes(files, metadata_manager, scratch, package):
+            count_errors += 1
+            log_fp.writelines(error)
 
     for name, key in [
         ("pydantic_models.txt", ClassDefVisitor.BASE_MODEL_CONTEXT_KEY),
@@ -177,6 +156,60 @@ def main(
 
     if difflines:
         raise Exit(1)
+
+
+def find_class_families_using_pyre(root_sets: list[set[str]]) -> list[set[str]]:
+    families = [set(r) for r in root_sets]
+    cmd_args = ["pyre", "--noninteractive", "query", "dump_class_hierarchy()"]
+    stdout = subprocess.run(cmd_args, check=True, stdout=subprocess.PIPE).stdout
+    resp = json.loads(stdout)["response"]
+    for entry in resp:
+        for class_fqn, class_ancestors in entry.items():
+            for roots, family in zip(root_sets, families):
+                if any(a in roots for a in class_ancestors):
+                    family.add(class_fqn)
+    return families
+
+
+def scan_for_classes(files: list[str], metadata_manager: FullRepoManager, scratch: dict[str, Any], package: Path) -> list[str]:
+    errors: list[str] = []
+    with Progress(*Progress.get_default_columns(), transient=True) as progress:
+        task = progress.add_task(description="Looking for Pydantic Models...", total=len(files))
+        queue = deque(files)
+        visited: Set[str] = set()
+
+        while queue:
+            # Queue logic
+            filename = queue.popleft()
+            visited.add(filename)
+            progress.advance(task)
+
+            # Visitor logic
+            code = Path(filename).read_text(encoding="utf8")
+            try:
+                module = cst.parse_module(code)
+                module_and_package = calculate_module_and_package(str(package), filename)
+
+                context = CodemodContext(
+                    metadata_manager=metadata_manager,
+                    filename=filename,
+                    full_module_name=module_and_package.name,
+                    full_package_name=module_and_package.package,
+                    scratch=scratch,
+                )
+                visitor = ClassDefVisitor(context=context)
+                visitor.transform_module(module)
+
+                # Queue logic
+                next_file = visitor.next_file(visited)
+                if next_file is not None:
+                    queue.appendleft(next_file)
+            except Exception:
+                errors.append(f"An error happened on {filename}.\n{traceback.format_exc()}")
+                # count_errors += 1
+                # log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
+                continue
+    return errors
 
 
 def run_codemods(
