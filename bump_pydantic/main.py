@@ -130,6 +130,16 @@ def main(
                 log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
                 continue
 
+    for name, key in [
+        ("pydantic_models.txt", ClassDefVisitor.BASE_MODEL_CONTEXT_KEY),
+        ("ormar_models.txt", ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY),
+        ("ormar_meta.txt", ClassDefVisitor.ORMAR_META_CONTEXT_KEY),
+    ]:
+        console.log(f"Found {len(scratch[key].known_members)} members of {key}.")
+        with open(name, "w") as f:
+            for fqn in sorted(scratch[key].known_members):
+                f.write(f"{fqn}\n")
+
     start_time = time.time()
 
     codemods = gather_codemods(disabled=disable)
