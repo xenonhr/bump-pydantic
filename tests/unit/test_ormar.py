@@ -1,10 +1,14 @@
+from typing import Any
+
+from libcst import MetadataWrapper, parse_module
 from libcst.codemod import CodemodContext, CodemodTest
-from libcst.metadata import FullRepoManager, FullyQualifiedNameProvider, ScopeProvider
+from libcst.metadata import FullRepoManager
 
 from bump_pydantic.codemods import OrmarCodemod
-from bump_pydantic.codemods.class_def_visitor import ClassCategory, ClassDefVisitor
+from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 from bump_pydantic.codemods.ormar import OrmarCodemod
 
+DEFAULT_PATH = "foo.py"
 
 class TestOrmarCodemod(CodemodTest):
     TRANSFORM = OrmarCodemod
@@ -13,21 +17,33 @@ class TestOrmarCodemod(CodemodTest):
 
     def setUp(self) -> None:
         scratch = {}
-        providers = {FullyQualifiedNameProvider, ScopeProvider}
-        metadata_manager = FullRepoManager(".", ["foo.py"], providers=providers)  # type: ignore[arg-type]
+        providers = [*self.TRANSFORM.METADATA_DEPENDENCIES, *ClassDefVisitor.METADATA_DEPENDENCIES]
+        metadata_manager = FullRepoManager(".", [DEFAULT_PATH], providers=providers)  # type: ignore[arg-type]
         metadata_manager.resolve_cache()
         context = CodemodContext(
             metadata_manager=metadata_manager,
-            filename="foo.py",
+            filename=DEFAULT_PATH,
             # full_module_name=module_and_package.name,
             # full_package_name=module_and_package.package,
             scratch=scratch,
         )
 
-        scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY] = ClassCategory(known_members={"ormar.Model", "foo.Album"})
-        scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY] = ClassCategory(known_members={"ormar.ModelMeta", "foo.BaseMeta"})
         self.context = context
         return super().setUp()
+
+    def assertCodemod(
+        self,
+        before: str,
+        after: str,
+        *args: Any,
+        **kwargs: Any) -> None:
+        mod = MetadataWrapper(
+            parse_module(CodemodTest.make_fixture_data(before)), True,
+            cache=self.context.metadata_manager.get_cache_for_path(DEFAULT_PATH),
+        )
+        instance = ClassDefVisitor(context=self.context)
+        mod.visit(instance)
+        super().assertCodemod(before, after, *args, context_override=self.context, **kwargs)
 
     def test_replace_meta(self) -> None:
         before = """
@@ -67,7 +83,7 @@ class TestOrmarCodemod(CodemodTest):
             name: str = ormar.String(max_length=100)
             favorite: bool = ormar.Boolean(default=False)
         """
-        self.assertCodemod(before, after, context_override=self.context)
+        self.assertCodemod(before, after)
 
 
     def test_replace_base_meta(self) -> None:
@@ -107,4 +123,4 @@ class TestOrmarCodemod(CodemodTest):
             name: str = ormar.String(max_length=100)
             favorite: bool = ormar.Boolean(default=False)
         """
-        self.assertCodemod(before, after, context_override=self.context)
+        self.assertCodemod(before, after)
