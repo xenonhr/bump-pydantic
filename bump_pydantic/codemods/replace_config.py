@@ -16,6 +16,10 @@ INHERIT_CONFIG_COMMENT = (
 )
 CHECK_LINK_COMMENT = "# Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information."
 
+NEW_DEFAULTS: dict[str, m.BaseMatcherNode] = {
+    "smart_union": m.Name(value="True"),
+    "underscore_attrs_are_private": m.Name(value="True"),
+}
 REMOVED_KEYS = [
     "error_msg_templates",
     "fields",
@@ -181,20 +185,24 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
 
     def visit_AssignTarget(self, node: cst.AssignTarget) -> None:
         if self.inside_config_class:
-            keyword = RENAMED_KEYS.get(node.target.value, node.target.value)  # type: ignore[attr-defined]
+            if not isinstance(target := node.target, cst.Name):
+                return
+            keyword = RENAMED_KEYS.get(target.value, target.value)  # type: ignore[attr-defined]
             if m.matches(self.assign_value, EXTRA_ATTRIBUTE):
                 value = cst.SimpleString(value=f'"{self.assign_value.attr.value}"')  # type: ignore[attr-defined]
                 RemoveImportsVisitor.remove_unused_import(self.context, "pydantic", "Extra")
             else:
                 value = self.assign_value  # type: ignore[assignment]
-            if node.target.value == "allow_mutation":
+            if target.value == "allow_mutation":
                 if m.matches(value, m.Name(value="False")):
                     value = cst.Name("True")
                 elif m.matches(value, m.Name(value="True")):
                     value = cst.Name("False")
+            if (default := NEW_DEFAULTS.get(target.value)) and m.matches(value, default):
+                return
             self.config_args.append(
                 cst.Arg(
-                    keyword=node.target.with_changes(value=keyword),  # type: ignore[arg-type]
+                    keyword=target.with_changes(value=keyword),
                     value=value,
                     equal=cst.AssignEqual(
                         whitespace_before=cst.SimpleWhitespace(""),
