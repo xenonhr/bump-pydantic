@@ -518,7 +518,6 @@ class TestValidatorCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
-    @pytest.mark.xfail(reason="Not implemented yet.")
     def test_root_validator_as_cst_name(self) -> None:
         before = """
         import typing as t
@@ -537,14 +536,14 @@ class TestValidatorCommand(CodemodTest):
         after = """
         import typing as t
 
-        from pydantic import BaseModel, model_validator
+        from pydantic import model_validator, BaseModel
 
 
         class Potato(BaseModel):
             name: str
             dialect: str
 
-            @model_validator
+            @model_validator(mode="after")
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
                 return values
         """

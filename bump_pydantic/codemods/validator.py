@@ -59,6 +59,7 @@ IMPORT_ROOT_VALIDATOR = m.Module(
         m.ZeroOrMore(),
     ]
 )
+BARE_ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Name("root_validator"))
 ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Call(func=m.Name("root_validator")))
 ROOT_VALIDATOR_FUNCTION = m.FunctionDef(decorators=[m.ZeroOrMore(), ROOT_VALIDATOR_DECORATOR, m.ZeroOrMore()])
 
@@ -150,7 +151,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         if len(node.params.params) > allowed_param_count or node.params.star_kwarg is not None:
             self._should_add_comment = True
 
-    @m.leave(ROOT_VALIDATOR_DECORATOR)
+    @m.leave(ROOT_VALIDATOR_DECORATOR|BARE_ROOT_VALIDATOR_DECORATOR)
     def leave_root_validator_func(self, original_node: cst.Decorator, updated_node: cst.Decorator) -> cst.Decorator:
         if self._has_comment:
             return updated_node
@@ -275,7 +276,13 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
     def _replace_validators(self, node: cst.Decorator, old_name: str, new_name: str) -> cst.Decorator:
         RemoveImportsVisitor.remove_unused_import(self.context, "pydantic", old_name)
         AddImportsVisitor.add_needed_import(self.context, "pydantic", new_name)
-        decorator = node.decorator.with_changes(func=cst.Name(new_name), args=self._args)
+        if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
+            decorator = cst.Call(func=cst.Name(new_name), args=[cst.Arg(
+                keyword=cst.Name("mode"),
+                value=cst.SimpleString('"after"'),
+                equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace("")))])
+        else:
+            decorator = node.decorator.with_changes(func=cst.Name(new_name), args=self._args)
         return node.with_changes(decorator=decorator)
 
 
