@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import functools
 import operator
-from typing import Collection, cast
 
 import libcst as cst
 from attr import dataclass
 from libcst import matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor
-from libcst.metadata import FullyQualifiedNameProvider, QualifiedName
+from libcst.metadata import FullyQualifiedNameProvider
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
@@ -35,7 +34,7 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
         ormar_model_bases = self.context.scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY].known_members
         ormar_meta_bases = self.context.scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY].known_members
-        fqn_set = cast(Collection[QualifiedName], self.get_metadata(FullyQualifiedNameProvider, node))
+        fqn_set = self.get_metadata(FullyQualifiedNameProvider, node, set())
         self._class_stack.append(ClassInfo(
             node,
             is_ormar_model=any(fqn.name in ormar_model_bases for fqn in fqn_set),

@@ -4,7 +4,9 @@ import libcst as cst
 from libcst import matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor, RemoveImportsVisitor
-from libcst.metadata import ClassScope, ScopeProvider
+from libcst.metadata import ClassScope, FullyQualifiedNameProvider, ScopeProvider
+
+from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
 PREFIX_COMMENT = "# TODO[pydantic]: "
 REFACTOR_COMMENT = f"{PREFIX_COMMENT}We couldn't refactor this class, please create the `model_config` manually."
@@ -112,7 +114,7 @@ class Config:
 class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
     """Replace `Config` class by `ConfigDict` call."""
 
-    METADATA_DEPENDENCIES = (ScopeProvider,)
+    METADATA_DEPENDENCIES = (ScopeProvider,FullyQualifiedNameProvider,)
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
@@ -122,6 +124,19 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
         self.invalid_config_class = False
         self.inherited_config_class = False
         self.config_args: List[cst.Arg] = []
+        self._is_model_stack: list[bool] = []
+        self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+
+    def _is_pydantic_model(self, node: cst.CSTNode) -> bool:
+        fqn_set = self.get_metadata(FullyQualifiedNameProvider, node, set())
+        return any(fqn.name in self.pydantic_model_bases for fqn in fqn_set)
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        self._is_model_stack.append(self._is_pydantic_model(node))
+
+    def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
+        self._is_model_stack.pop()
+        return updated_node
 
     @m.visit(m.ClassDef(bases=[m.ZeroOrMore(), m.Arg(value=m.Name("BaseSettings")), m.ZeroOrMore()]))
     def visit_settings_with_config(self, node: cst.ClassDef) -> None:
@@ -129,6 +144,8 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
 
     @m.visit(m.ClassDef(name=m.Name(value="Config")))
     def visit_config_class(self, node: cst.ClassDef) -> None:
+        if not self._is_model_stack or not self._is_model_stack[-1]:
+            return
         scope = self.get_metadata(ScopeProvider, node)
         if isinstance(scope, ClassScope):
             self.inside_config_class = True
@@ -195,6 +212,8 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
 
     @m.leave(BASE_MODEL_WITH_INHERITED_CONFIG)
     def leave_inherited_config_class(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
+        if not self._is_pydantic_model(original_node):
+            return original_node
         self.inherited_config_class = False
         return updated_node
 
@@ -211,6 +230,8 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
         assigned a `ConfigDict` object with the same arguments as the attributes
         from `Config` class.
         """
+        if not self._is_pydantic_model(original_node):
+            return original_node
         if self.invalid_config_class:
             self.invalid_config_class = False
             return updated_node

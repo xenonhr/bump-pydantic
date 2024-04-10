@@ -1,6 +1,8 @@
 import pytest
-from libcst.codemod import CodemodTest
+from libcst.codemod import CodemodContext, CodemodTest
+from libcst.metadata import FullRepoManager, FullyQualifiedNameProvider, ScopeProvider
 
+from bump_pydantic.codemods.class_def_visitor import ClassCategory, ClassDefVisitor
 from bump_pydantic.codemods.replace_config import ReplaceConfigCodemod
 
 
@@ -8,6 +10,29 @@ class TestReplaceConfigCommand(CodemodTest):
     TRANSFORM = ReplaceConfigCodemod
 
     maxDiff = None
+
+    def setUp(self) -> None:
+        scratch = {}
+        providers = {FullyQualifiedNameProvider, ScopeProvider}
+        metadata_manager = FullRepoManager(".", ["foo.py"], providers=providers)  # type: ignore[arg-type]
+        metadata_manager.resolve_cache()
+        context = CodemodContext(
+            metadata_manager=metadata_manager,
+            filename="foo.py",
+            # full_module_name=module_and_package.name,
+            # full_package_name=module_and_package.package,
+            scratch=scratch,
+        )
+
+        scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY] = ClassCategory(known_members={"pydantic.BaseModel", "pydantic.main.BaseModel"})
+        self.context = context
+        return super().setUp()
+
+    def markAsPydanticModel(self, fqn: str, *fqns: str) -> None:
+        all_fqns = [fqn, *fqns]
+        for fqn in all_fqns:
+            self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].mark_as_member(fqn)
+
 
     def test_config(self) -> None:
         before = """
@@ -23,7 +48,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_config = ConfigDict(allow_arbitrary_types=True)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_noop_config(self) -> None:
         code = """
@@ -33,9 +59,8 @@ class TestReplaceConfigCommand(CodemodTest):
             class Config:
                 allow_mutation = True
         """
-        self.assertCodemod(code, code)
+        self.assertCodemod(code, code, context_override=self.context)
 
-    @pytest.mark.xfail(reason="Not implemented yet")
     def test_noop_config_with_bases(self) -> None:
         code = """
         from potato import RandomBase
@@ -44,7 +69,7 @@ class TestReplaceConfigCommand(CodemodTest):
             class Config:
                 allow_mutation = True
         """
-        self.assertCodemod(code, code)
+        self.assertCodemod(code, code, context_override=self.context)
 
     def test_global_config_class(self) -> None:
         code = """
@@ -53,7 +78,7 @@ class TestReplaceConfigCommand(CodemodTest):
         class Config:
             allow_arbitrary_types = True
         """
-        self.assertCodemod(code, code)
+        self.assertCodemod(code, code, context_override=self.context)
 
     def test_reset_config_args(self) -> None:
         before = """
@@ -80,7 +105,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato2(BaseModel):
             model_config = ConfigDict(strict=True)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato", "foo.Potato2")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_config_with_non_assign(self) -> None:
         before = """
@@ -105,7 +131,8 @@ class TestReplaceConfigCommand(CodemodTest):
                 def __init__(self):
                     self.allow_mutation = True
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_inherited_config(self) -> None:
         before = """
@@ -128,7 +155,8 @@ class TestReplaceConfigCommand(CodemodTest):
             class Config(SuperConfig):
                 allow_arbitrary_types = True
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     @pytest.mark.xfail(reason="Comments inside Config are swallowed.")
     def test_inner_comments(self) -> None:
@@ -149,7 +177,8 @@ class TestReplaceConfigCommand(CodemodTest):
                 allow_arbitrary_types=True
             )
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_already_commented(self) -> None:
         before = """
@@ -174,7 +203,8 @@ class TestReplaceConfigCommand(CodemodTest):
             class Config(SuperConfig):
                 allow_arbitrary_types = True
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_extra_enum(self) -> None:
         before = """
@@ -190,7 +220,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_config = ConfigDict(extra="allow")
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_allow_mutation(self) -> None:
         before = """
@@ -206,7 +237,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_config = ConfigDict(frozen=True)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_removed_keys(self) -> None:
         before = """
@@ -224,7 +256,8 @@ class TestReplaceConfigCommand(CodemodTest):
             # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
             model_config = ConfigDict(underscore_attrs_are_private=True)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_multiple_removed_keys(self) -> None:
         before = """
@@ -243,7 +276,8 @@ class TestReplaceConfigCommand(CodemodTest):
             # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
             model_config = ConfigDict(underscore_attrs_are_private=True, smart_union=True)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_renamed_keys(self) -> None:
         before = """
@@ -259,7 +293,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_config = ConfigDict(from_attributes=True)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_rename_extra_enum_by_string(self) -> None:
         before = """
@@ -275,7 +310,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_config = ConfigDict(extra="allow")
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_noop_extra(self) -> None:
         before = """
@@ -293,7 +329,8 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_config = ConfigDict(extra=Extra.potato)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Potato")
+        self.assertCodemod(before, after, context_override=self.context)
 
     def test_extra_inside(self) -> None:
         before = """
@@ -327,4 +364,5 @@ class TestReplaceConfigCommand(CodemodTest):
                 cls.Config = Config  # type: ignore
                 super().__init_subclass__(**kwargs)
         """
-        self.assertCodemod(before, after)
+        self.markAsPydanticModel("foo.Model")
+        self.assertCodemod(before, after, context_override=self.context)
