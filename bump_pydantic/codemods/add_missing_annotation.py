@@ -50,6 +50,10 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
             annotation = cst.Name("str")
         elif m.matches(updated_node.value, m.Integer()):
             annotation = cst.Name("int")
+        elif m.matches(updated_node.value, m.Name("True") | m.Name("False")):
+            annotation = cst.Name("bool")
+        elif m.matches(updated_node.value, m.Float()):
+            annotation = cst.Name("float")
 
         if annotation is None:
             self.should_add_comment = True
