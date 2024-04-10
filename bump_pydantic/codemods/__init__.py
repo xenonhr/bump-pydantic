@@ -5,6 +5,7 @@ from libcst.codemod import ContextAwareTransformer
 from libcst.codemod.visitors import AddImportsVisitor, RemoveImportsVisitor
 
 from bump_pydantic.codemods.add_default_none import AddDefaultNoneCommand
+from bump_pydantic.codemods.add_missing_annotation import AddMissingAnnotationCommand
 from bump_pydantic.codemods.con_func import ConFuncCallCommand
 from bump_pydantic.codemods.custom_types import CustomTypeCodemod
 from bump_pydantic.codemods.field import FieldCodemod
@@ -35,6 +36,8 @@ class Rule(str, Enum):
     """Replace `con*` functions by `Annotated` versions."""
     BP009 = "BP009"
     """Mark Pydantic "protocol" functions in custom types with proper TODOs."""
+    BP010 = "BP010"
+    """Add type annotations to fields that are missing them."""
     BO001 = "BO001"
     """Update Ormar models."""
 
@@ -69,6 +72,9 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
 
     if Rule.BP009 not in disabled:
         codemods.append(CustomTypeCodemod)
+
+    if Rule.BP010 not in disabled:
+        codemods.append(AddMissingAnnotationCommand)
 
     if Rule.BO001 not in disabled:
         codemods.append(OrmarCodemod)
