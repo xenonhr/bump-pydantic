@@ -96,15 +96,20 @@ def main(
     log_fp = log_file.open("a+", encoding="utf8")
 
     scratch: dict[str, Any] = {}
+    scan_needed = True
     if (package / ".pyre_configuration").exists():
         console.log("Found .pyre_configuration file. Using Pyre to find class families.")
-        (scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY],
-        scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY],
-        scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY]) = find_class_families_using_pyre([
-            {"pydantic.BaseModel", "pydantic.main.BaseModel"},
-            {"ormar.Model", "ormar.models.model.Model"},
-            {"ormar.ModelMeta", "ormar.models.metaclass.ModelMeta"}])
-    else:
+        try:
+            (scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY],
+            scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY],
+            scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY]) = find_class_families_using_pyre([
+                {"pydantic.BaseModel", "pydantic.main.BaseModel"},
+                {"ormar.Model", "ormar.models.model.Model"},
+                {"ormar.ModelMeta", "ormar.models.metaclass.ModelMeta"}])
+            scan_needed = False
+        except Exception as e:
+            console.log(f"Failed to use Pyre to find class families: {e}")
+    if scan_needed:
         for error in scan_for_classes(files, metadata_manager, scratch, package):
             count_errors += 1
             log_fp.writelines(error)
