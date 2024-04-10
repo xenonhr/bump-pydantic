@@ -22,7 +22,7 @@ from typing_extensions import ParamSpec
 
 from bump_pydantic import __version__
 from bump_pydantic.codemods import Rule, gather_codemods
-from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
+from bump_pydantic.codemods.class_def_visitor import ClassCategory, ClassDefVisitor
 from bump_pydantic.glob_helpers import match_glob
 
 app = Typer(invoke_without_command=True, add_completion=False)
@@ -100,12 +100,14 @@ def main(
     if (package / ".pyre_configuration").exists():
         console.log("Found .pyre_configuration file. Using Pyre to find class families.")
         try:
-            (scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY],
-            scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY],
-            scratch[ClassDefVisitor.ORMAR_META_CONTEXT_KEY]) = find_class_families_using_pyre([
-                {"pydantic.BaseModel", "pydantic.main.BaseModel"},
-                {"ormar.Model", "ormar.models.model.Model"},
-                {"ormar.ModelMeta", "ormar.models.metaclass.ModelMeta"}])
+            families = [
+                (ClassDefVisitor.BASE_MODEL_CONTEXT_KEY, {"pydantic.BaseModel", "pydantic.main.BaseModel"}),
+                (ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY, {"ormar.Model", "ormar.models.model.Model"}),
+                (ClassDefVisitor.ORMAR_META_CONTEXT_KEY, {"ormar.ModelMeta", "ormar.models.metaclass.ModelMeta"}),
+            ]
+            class_sets = find_class_families_using_pyre([f[1] for f in families])
+            for (key, _), class_set in zip(families, class_sets):
+                scratch[key] = ClassCategory(known_members=class_set)
             scan_needed = False
         except Exception as e:
             console.log(f"Failed to use Pyre to find class families: {e}")
