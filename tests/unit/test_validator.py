@@ -318,7 +318,7 @@ class TestValidatorCommand(CodemodTest):
             name: str
             dialect: str
 
-            @model_validator()
+            @model_validator(mode="after")
             @classmethod
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
                 if "gateways" not in values and "gateway" in values:
@@ -544,6 +544,39 @@ class TestValidatorCommand(CodemodTest):
             dialect: str
 
             @model_validator(mode="after")
+            @classmethod
+            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+                return values
+        """
+        self.assertCodemod(before, after)
+
+    def test_root_validator_call_with_no_args(self) -> None:
+        before = """
+        import typing as t
+
+        from pydantic import BaseModel, root_validator
+
+
+        class Potato(BaseModel):
+            name: str
+            dialect: str
+
+            @root_validator()
+            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+                return values
+        """
+        after = """
+        import typing as t
+
+        from pydantic import model_validator, BaseModel
+
+
+        class Potato(BaseModel):
+            name: str
+            dialect: str
+
+            @model_validator(mode="after")
+            @classmethod
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
                 return values
         """

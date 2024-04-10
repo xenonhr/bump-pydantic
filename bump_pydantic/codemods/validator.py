@@ -60,6 +60,8 @@ IMPORT_ROOT_VALIDATOR = m.Module(
     ]
 )
 BARE_ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Name("root_validator"))
+BARE_ROOT_VALIDATOR_FUNCTION = m.FunctionDef(decorators=[m.ZeroOrMore(), BARE_ROOT_VALIDATOR_DECORATOR, m.ZeroOrMore()])
+
 ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Call(func=m.Name("root_validator")))
 ROOT_VALIDATOR_FUNCTION = m.FunctionDef(decorators=[m.ZeroOrMore(), ROOT_VALIDATOR_DECORATOR, m.ZeroOrMore()])
 
@@ -171,7 +173,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
 
         return self._replace_validators(updated_node, "validator", "field_validator")
 
-    @m.leave(VALIDATOR_FUNCTION | ROOT_VALIDATOR_FUNCTION)
+    @m.leave(VALIDATOR_FUNCTION | ROOT_VALIDATOR_FUNCTION | BARE_ROOT_VALIDATOR_FUNCTION)
     def leave_validator_func(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
         self._args = []
         self._has_comment = False
@@ -276,12 +278,15 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
     def _replace_validators(self, node: cst.Decorator, old_name: str, new_name: str) -> cst.Decorator:
         RemoveImportsVisitor.remove_unused_import(self.context, "pydantic", old_name)
         AddImportsVisitor.add_needed_import(self.context, "pydantic", new_name)
-        if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
-            decorator = cst.Call(func=cst.Name(new_name), args=[cst.Arg(
+        mode_after = cst.Arg(
                 keyword=cst.Name("mode"),
                 value=cst.SimpleString('"after"'),
-                equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace("")))])
+                equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace("")))
+        if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
+            decorator = cst.Call(func=cst.Name(new_name), args=[mode_after])
         else:
+            if m.matches(node, ROOT_VALIDATOR_DECORATOR) and not any(arg.keyword and arg.keyword.value == "mode" for arg in self._args):
+                self._args.append(mode_after)
             decorator = node.decorator.with_changes(func=cst.Name(new_name), args=self._args)
         return node.with_changes(decorator=decorator)
 
