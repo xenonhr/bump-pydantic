@@ -7,7 +7,10 @@ from libcst.metadata import FullyQualifiedNameProvider, NonCachedTypeInferencePr
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
-METHOD_MAP = {
+ATTRIBUTE_MAP = {
+    "__fields__": "model_fields",
+    "__private_attributes__": "__pydantic_private__",
+    "__validators__": "__pydantic_validator__",
     "construct": "model_construct",
     "copy": "model_copy",
     "dict": "model_dump",
@@ -17,10 +20,10 @@ METHOD_MAP = {
     "update_forward_refs": "model_rebuild",
 }
 
-MODEL_METHOD_CALL=m.Call(func=m.Attribute(attr=m.OneOf(*(m.Name(method) for method in METHOD_MAP.keys()))))
+MODEL_ATTRIBUTE=func=m.Attribute(attr=m.OneOf(*(m.Name(attr) for attr in ATTRIBUTE_MAP.keys())))
 
 
-class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
+class ReplaceModelAttributeAccessCommand(VisitorBasedCodemodCommand):
 
     METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, NonCachedTypeInferenceProvider)
 
@@ -28,23 +31,15 @@ class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
         super().__init__(context)
 
         self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
-        self.should_add_comment = False
-        self.node_stack = list[cst.CSTNode]()
 
-    @m.leave(MODEL_METHOD_CALL)
-    def leave_json_call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
-        func_attr: cst.Attribute = cst.ensure_type(original_node.func, cst.Attribute)
-        obj = func_attr.value
-        old_method = func_attr.attr.value
+    @m.leave(MODEL_ATTRIBUTE)
+    def leave_model_attr(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.Attribute:
+        obj = original_node.value
+        old_attr = original_node.attr.value
         fqn = self.get_metadata(NonCachedTypeInferenceProvider, obj, None)
         if not fqn:
             # We don't know what this is! Warn?
             return updated_node
         if fqn in self.pydantic_model_bases:
-            return updated_node.with_changes(
-                func=cst.Attribute(
-                    attr=cst.Name(METHOD_MAP[old_method]),
-                    value=updated_node.func.value
-                )
-            )
+            return updated_node.with_changes(attr=cst.Name(ATTRIBUTE_MAP[old_attr]))
         return updated_node

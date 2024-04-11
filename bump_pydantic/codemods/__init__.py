@@ -13,7 +13,7 @@ from bump_pydantic.codemods.ormar import OrmarCodemod
 from bump_pydantic.codemods.replace_config import ReplaceConfigCodemod
 from bump_pydantic.codemods.replace_generic_model import ReplaceGenericModelCommand
 from bump_pydantic.codemods.replace_imports import ReplaceImportsCodemod
-from bump_pydantic.codemods.replace_model_method_calls import ReplaceModelMethodCallsCommand
+from bump_pydantic.codemods.replace_model_attribute_access import ReplaceModelAttributeAccessCommand
 from bump_pydantic.codemods.root_model import RootModelCommand
 from bump_pydantic.codemods.validator import ValidatorCodemod
 
@@ -40,7 +40,7 @@ class Rule(str, Enum):
     BP010 = "BP010"
     """Add type annotations to fields that are missing them."""
     BP011 = "BP011"
-    """Replace `model.json()` with `model_dump_json()`."""
+    """Replace `model.<old_attribute>` with `model.<new_attribute>`."""
     BO001 = "BO001"
     """Update Ormar models."""
 
@@ -80,7 +80,7 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
         codemods.append(AddMissingAnnotationCommand)
 
     if Rule.BP011 not in disabled:
-        codemods.append(ReplaceModelMethodCallsCommand)
+        codemods.append(ReplaceModelAttributeAccessCommand)
 
     if Rule.BO001 not in disabled:
         codemods.append(OrmarCodemod)
