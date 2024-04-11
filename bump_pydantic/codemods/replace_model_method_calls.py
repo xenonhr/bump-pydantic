@@ -3,7 +3,7 @@ from __future__ import annotations
 import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
-from libcst.metadata import FullyQualifiedNameProvider, TypeInferenceProvider
+from libcst.metadata import FullyQualifiedNameProvider, NonCachedTypeInferenceProvider
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
@@ -22,7 +22,7 @@ MODEL_METHOD_CALL=m.Call(func=m.Attribute(attr=m.OneOf(*(m.Name(method) for meth
 
 class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
 
-    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, TypeInferenceProvider)
+    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, NonCachedTypeInferenceProvider)
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
@@ -36,7 +36,7 @@ class ReplaceModelMethodCallsCommand(VisitorBasedCodemodCommand):
         func_attr: cst.Attribute = cst.ensure_type(original_node.func, cst.Attribute)
         obj = func_attr.value
         old_method = func_attr.attr.value
-        fqn = self.get_metadata(TypeInferenceProvider, obj, None)
+        fqn = self.get_metadata(NonCachedTypeInferenceProvider, obj, None)
         if not fqn:
             # We don't know what this is! Warn?
             return updated_node

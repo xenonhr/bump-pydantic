@@ -14,12 +14,7 @@ from typing import Any, Dict, Iterable, List, Set, Tuple, Type, TypeVar, Union
 import libcst as cst
 from libcst.codemod import CodemodContext, ContextAwareTransformer
 from libcst.helpers import calculate_module_and_package
-from libcst.metadata import (
-    FullRepoManager,
-    FullyQualifiedNameProvider,
-    ScopeProvider,
-    TypeInferenceProvider,
-)
+from libcst.metadata import FullRepoManager, FullyQualifiedNameProvider, ScopeProvider
 from rich.console import Console
 from rich.progress import Progress
 from typer import Argument, Exit, Option, Typer, echo
@@ -93,7 +88,9 @@ def main(
         console.log("No files to process.")
         raise Exit()
 
-    providers = {FullyQualifiedNameProvider, ScopeProvider, TypeInferenceProvider}
+    # Note: we do _not_ cache TypeInferenceProvider because it takes forever and will eventually cause an OOM.
+    # It's silly to cache all type inferences for the entire repo.
+    providers = {FullyQualifiedNameProvider, ScopeProvider}
     metadata_manager = FullRepoManager(".", files, providers=providers, timeout=3600)  # type: ignore[arg-type]
     metadata_manager.resolve_cache()
 
