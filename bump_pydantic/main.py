@@ -94,7 +94,7 @@ def main(
         raise Exit()
 
     providers = {FullyQualifiedNameProvider, ScopeProvider, TypeInferenceProvider}
-    metadata_manager = FullRepoManager(".", files, providers=providers)  # type: ignore[arg-type]
+    metadata_manager = FullRepoManager(".", files, providers=providers, timeout=3600)  # type: ignore[arg-type]
     metadata_manager.resolve_cache()
 
     count_errors = 0
