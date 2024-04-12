@@ -12,7 +12,7 @@ REFACTOR_COMMENT = (
     f"{PREFIX_COMMENT}all model fields must have a type annotation."
 )
 
-UNTYPED_ASSIGN_MATCHER = m.Assign(targets=[m.AssignTarget(m.Name())])
+UNTYPED_ASSIGN_MATCHER = m.Assign(targets=[m.AssignTarget(m.Name() & ~m.Name("model_config"))])
 MEMBER_ASSIGN_ANCESTORS = [m.ClassDef(), m.IndentedBlock(), m.SimpleStatementLine()]
 
 class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
