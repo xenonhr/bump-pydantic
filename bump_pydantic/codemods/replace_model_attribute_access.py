@@ -18,6 +18,7 @@ ATTRIBUTE_MAP = {
     "json": "model_dump_json",
     "parse_obj": "model_validate",
     "update_forward_refs": "model_rebuild",
+    "parse_raw": "model_validate_json",
 }
 
 MODEL_ATTRIBUTE=func=m.Attribute(attr=m.OneOf(*(m.Name(attr) for attr in ATTRIBUTE_MAP.keys())))
