@@ -239,7 +239,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             value=cst.Name(value="True"),
             equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace("")))
 
-        pyd_fields: Sequence[cst.CSTNode] = m.findall(ann_assign, pyd_field_matcher, metadata_resolver=self.context.wrapper)
+        pyd_fields: Sequence[cst.CSTNode] = self.findall(ann_assign, pyd_field_matcher)
         if pyd_fields:
             # There is already a pydantic.Field, add validate_default=True to it.
             pyd_field = cst.ensure_type(pyd_fields[0], cst.Call)
