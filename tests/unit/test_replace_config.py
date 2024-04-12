@@ -244,6 +244,23 @@ class TestReplaceConfigCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_allow_mutation_redundant(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            class Config:
+                allow_mutation = False
+                frozen = True
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_config = ConfigDict(frozen=True)
+        """
+        self.assertCodemod(before, after)
+
     def test_removed_keys(self) -> None:
         before = """
         from pydantic import BaseModel

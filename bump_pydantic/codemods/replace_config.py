@@ -198,8 +198,16 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
                     value = cst.Name("True")
                 elif m.matches(value, m.Name(value="True")):
                     value = cst.Name("False")
+                else:
+                    value = cst.UnaryOperation(operator=cst.Not(), expression=value)
             if (default := NEW_DEFAULTS.get(target.value)) and m.matches(value, default):
                 return
+            if keyword == "frozen":
+                # If someone had both allow_mutation and frozen, with compatible values,
+                # remove the duplication.
+                duplicate_matcher = m.Arg(keyword=m.Name("frozen"), value=m.MatchIfTrue(lambda v: value.deep_equals(v)))
+                if any(m.matches(arg, duplicate_matcher) for arg in self.config_args):
+                    return
             self.config_args.append(
                 cst.Arg(
                     keyword=target.with_changes(value=keyword),
