@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
@@ -46,6 +48,8 @@ class ReplaceModelAttributeAccessCommand(VisitorBasedCodemodCommand):
         if not fqn:
             # We don't know what this is! Warn?
             return updated_node
+        if (match := re.match(r"typing\.Type\[(.*)\]", fqn)):
+            fqn = match.group(1)
         if fqn in self.pydantic_model_bases:
             return updated_node.with_changes(attr=cst.Name(ATTRIBUTE_MAP[old_attr]))
         return updated_node
