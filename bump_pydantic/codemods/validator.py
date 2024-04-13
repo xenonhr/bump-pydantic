@@ -122,6 +122,8 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
                     self._args.append(arg.with_changes(keyword=cst.Name("mode"), value=cst.SimpleString('"before"')))
                 elif m.matches(arg, m.Arg(keyword=m.Name("always"), value=m.Name("True"))):
                     always = True
+                elif m.matches(arg, m.Arg(keyword=m.Name("skip_on_failure"), value=m.Name("True"))):
+                    continue
                 elif m.matches(arg.keyword, m.Name(value=m.MatchIfTrue(lambda v: v in ("each_item", "always")))):
                     self._should_add_comment = True
                 else:

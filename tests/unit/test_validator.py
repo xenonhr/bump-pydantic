@@ -113,6 +113,40 @@ class TestValidatorCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_remove_skip_on_failure_from_model_validator(self) -> None:
+        before = """
+        import typing as t
+
+        from pydantic import BaseModel, root_validator
+
+
+        class Potato(BaseModel):
+            name: str
+            dialect: str
+
+            @root_validator(skip_on_failure=True)
+            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+                if "gateways" not in values and "gateway" in values:
+                    values["gateways"] = values.pop("gateway")
+        """
+        after = """
+        import typing as t
+
+        from pydantic import model_validator, BaseModel
+
+
+        class Potato(BaseModel):
+            name: str
+            dialect: str
+
+            @model_validator(mode="after")
+            @classmethod
+            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+                if "gateways" not in values and "gateway" in values:
+                    values["gateways"] = values.pop("gateway")
+        """
+        self.assertCodemod(before, after)
+
     def test_replace_validator_with_values(self) -> None:
         before = """
         import typing as t
