@@ -55,7 +55,7 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
             annotation = cst.Name("bool")
         elif m.matches(updated_node.value, m.Float()):
             annotation = cst.Name("float")
-        elif (fqn := self.get_metadata(NonCachedTypeInferenceProvider, original_node.targets[0].target, None)):
+        elif (fqn := self.get_metadata(NonCachedTypeInferenceProvider, original_node.targets[0].target, None)) and fqn != "typing.Any":
             try:
                 annotation = cst.parse_expression(fqn)
                 root_attr_matcher = m.Attribute(value=m.Name(), attr=m.Name())
