@@ -8,6 +8,10 @@ from libcst.metadata import FullyQualifiedNameProvider, QualifiedName
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
 
+def m_name_or_pydantic_attr(name: str) -> m.OneOf[m.BaseExpressionMatchType]:
+    return m.Name(name) | m.Attribute(attr=m.Name(name), value=m.Name("pydantic"))
+
+
 class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
     """This codemod adds the default value `None` to all fields of a pydantic model that
     are either type `Optional[T]`, `Union[T, None]` or `Any`.
@@ -81,7 +85,7 @@ class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
         if self.inside_base_model and self.should_add_none:
             if updated_node.value is None:
                 updated_node = updated_node.with_changes(value=cst.Name("None"))
-            elif m.matches(updated_node.value, m.Call(func=m.Name("Field"))):
+            elif m.matches(updated_node.value, m.Call(func=m_name_or_pydantic_attr("Field"))):
                 assert isinstance(updated_node.value, cst.Call)
                 args = updated_node.value.args
                 if args:

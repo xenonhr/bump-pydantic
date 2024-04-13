@@ -148,3 +148,22 @@ class Potato(BaseModel):
 """
         )
         assert module.code == expected
+
+    def test_with_optional_import_pydantic(self) -> None:
+        module = self.add_default_none(
+            "some/test/module.py",
+            """
+            import pydantic
+
+            class Potato(pydantic.BaseModel):
+                a: Optional[str] = pydantic.Field(allow_mutation=False)
+            """,
+        )
+        expected = textwrap.dedent(
+            """import pydantic
+
+class Potato(pydantic.BaseModel):
+    a: Optional[str] = pydantic.Field(None, allow_mutation=False)
+"""
+        )
+        assert module.code == expected
