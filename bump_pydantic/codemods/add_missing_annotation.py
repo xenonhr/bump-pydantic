@@ -3,7 +3,8 @@ from __future__ import annotations
 import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
-from libcst.metadata import FullyQualifiedNameProvider, ParentNodeProvider
+from libcst.codemod.visitors import AddImportsVisitor
+from libcst.metadata import FullyQualifiedNameProvider, NonCachedTypeInferenceProvider
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
@@ -17,7 +18,7 @@ MEMBER_ASSIGN_ANCESTORS = [m.ClassDef(), m.IndentedBlock(), m.SimpleStatementLin
 
 class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
 
-    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, ParentNodeProvider)
+    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, NonCachedTypeInferenceProvider)
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
@@ -54,6 +55,14 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
             annotation = cst.Name("bool")
         elif m.matches(updated_node.value, m.Float()):
             annotation = cst.Name("float")
+        elif (fqn := self.get_metadata(NonCachedTypeInferenceProvider, original_node.targets[0].target, None)):
+            try:
+                annotation = cst.parse_expression(fqn)
+                root_attr_matcher = m.Attribute(value=m.Name(), attr=m.Name())
+                for attribute in m.findall(annotation, root_attr_matcher):
+                    AddImportsVisitor.add_needed_import(self.context, attribute.value.value)
+            except cst.ParserSyntaxError:
+                pass
 
         if annotation is None:
             self.should_add_comment = True
