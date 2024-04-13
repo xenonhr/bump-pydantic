@@ -1,11 +1,47 @@
-import pytest
-from libcst.codemod import CodemodTest
+from typing import Any
 
+import pytest
+from libcst import MetadataWrapper, parse_module
+from libcst.codemod import CodemodContext, CodemodTest
+from libcst.metadata import FullRepoManager
+
+from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 from bump_pydantic.codemods.replace_imports import ReplaceImportsCodemod
 
+DEFAULT_PATH = "foo.py"
 
 class TestReplaceImportsCommand(CodemodTest):
     TRANSFORM = ReplaceImportsCodemod
+
+    def setUp(self) -> None:
+        scratch = {}
+        providers = [*self.TRANSFORM.METADATA_DEPENDENCIES, *ClassDefVisitor.METADATA_DEPENDENCIES]
+        metadata_manager = FullRepoManager(".", [DEFAULT_PATH], providers=providers)  # type: ignore[arg-type]
+        metadata_manager.resolve_cache()
+        context = CodemodContext(
+            metadata_manager=metadata_manager,
+            filename=DEFAULT_PATH,
+            # full_module_name=module_and_package.name,
+            # full_package_name=module_and_package.package,
+            scratch=scratch,
+        )
+
+        self.context = context
+        return super().setUp()
+
+    def assertCodemod(
+        self,
+        before: str,
+        after: str,
+        *args: Any,
+        **kwargs: Any) -> None:
+        mod = MetadataWrapper(
+            parse_module(CodemodTest.make_fixture_data(before)), True,
+            cache=self.context.metadata_manager.get_cache_for_path(DEFAULT_PATH),
+        )
+        instance = ClassDefVisitor(context=self.context)
+        mod.visit(instance)
+        super().assertCodemod(before, after, *args, context_override=self.context, **kwargs)
 
     def test_base_settings(self) -> None:
         before = """
@@ -94,3 +130,36 @@ class TestReplaceImportsCommand(CodemodTest):
         from pydantic_extra_types.payment import PaymentCardBrand, PaymentCardNumber
         """
         self.assertCodemod(before, after)
+
+    def test_typed_dict_with_model(self) -> None:
+        before = """
+        from typing import TypedDict
+        from pydantic import BaseModel
+
+        class PotatoDict(TypedDict):
+            a: int
+            b: str
+
+        class Potato(BaseModel):
+            data: PotatoDict
+        """
+        after = """
+        from pydantic import BaseModel
+        from typing_extensions import TypedDict
+
+        class PotatoDict(TypedDict):
+            a: int
+            b: str
+
+        class Potato(BaseModel):
+            data: PotatoDict
+        """
+        self.assertCodemod(before, after)
+
+    def test_typed_dict_nop_without_model(self) -> None:
+        code = """
+        from typing import TypedDict
+
+        pass
+        """
+        self.assertCodemod(code, code)
