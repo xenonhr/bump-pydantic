@@ -16,6 +16,9 @@ VALIDATOR_COMMENT = REFACTOR_COMMENT.format(old_name="validator", new_name="fiel
 ROOT_VALIDATOR_COMMENT = REFACTOR_COMMENT.format(old_name="root_validator", new_name="model_validator")
 CHECK_LINK_COMMENT = "# Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information."
 
+def m_name_or_pydantic_attr(name: str) -> m.OneOf[m.BaseExpressionMatchType]:
+    return m.Name(name) | m.Attribute(attr=m.Name(name), value=m.Name("pydantic"))
+
 IMPORT_VALIDATOR = m.Module(
     body=[
         m.ZeroOrMore(),
@@ -36,7 +39,7 @@ IMPORT_VALIDATOR = m.Module(
         m.ZeroOrMore(),
     ]
 )
-VALIDATOR_DECORATOR = m.Decorator(decorator=m.Call(func=m.Name("validator")))
+VALIDATOR_DECORATOR = m.Decorator(decorator=m.Call(func=m_name_or_pydantic_attr("validator")))
 VALIDATOR_FUNCTION = m.FunctionDef(decorators=[m.ZeroOrMore(), VALIDATOR_DECORATOR, m.ZeroOrMore()])
 
 IMPORT_ROOT_VALIDATOR = m.Module(
@@ -59,10 +62,10 @@ IMPORT_ROOT_VALIDATOR = m.Module(
         m.ZeroOrMore(),
     ]
 )
-BARE_ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Name("root_validator"))
+BARE_ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m_name_or_pydantic_attr("root_validator"))
 BARE_ROOT_VALIDATOR_FUNCTION = m.FunctionDef(decorators=[m.ZeroOrMore(), BARE_ROOT_VALIDATOR_DECORATOR, m.ZeroOrMore()])
 
-ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Call(func=m.Name("root_validator")))
+ROOT_VALIDATOR_DECORATOR = m.Decorator(decorator=m.Call(func=m_name_or_pydantic_attr("root_validator")))
 ROOT_VALIDATOR_FUNCTION = m.FunctionDef(decorators=[m.ZeroOrMore(), ROOT_VALIDATOR_DECORATOR, m.ZeroOrMore()])
 
 ASSIGN_TO_VALUES = (
@@ -276,18 +279,24 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         )
 
     def _replace_validators(self, node: cst.Decorator, old_name: str, new_name: str) -> cst.Decorator:
-        RemoveImportsVisitor.remove_unused_import(self.context, "pydantic", old_name)
-        AddImportsVisitor.add_needed_import(self.context, "pydantic", new_name)
         mode_after = cst.Arg(
                 keyword=cst.Name("mode"),
                 value=cst.SimpleString('"after"'),
                 equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace("")))
+        old_func = cst.ensure_type(node.decorator, cst.Call).func if m.matches(node.decorator, m.Call()) else node.decorator
+        if isinstance(old_func, cst.Name):
+            new_func = cst.Name(new_name)
+            RemoveImportsVisitor.remove_unused_import(self.context, "pydantic", old_name)
+            AddImportsVisitor.add_needed_import(self.context, "pydantic", new_name)
+        else:
+            new_func = cst.Attribute(attr=cst.Name(new_name), value=cst.Name("pydantic"))
+
         if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
-            decorator = cst.Call(func=cst.Name(new_name), args=[mode_after])
+            decorator = cst.Call(func=new_func, args=[mode_after])
         else:
             if m.matches(node, ROOT_VALIDATOR_DECORATOR) and not any(arg.keyword and arg.keyword.value == "mode" for arg in self._args):
                 self._args.append(mode_after)
-            decorator = node.decorator.with_changes(func=cst.Name(new_name), args=self._args)
+            decorator = node.decorator.with_changes(func=new_func, args=self._args)
         return node.with_changes(decorator=decorator)
 
 

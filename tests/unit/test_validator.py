@@ -477,7 +477,6 @@ class TestValidatorCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
-    @pytest.mark.xfail(reason="Not implemented yet")
     def test_import_pydantic(self) -> None:
         before = """
         import typing as t
@@ -500,7 +499,6 @@ class TestValidatorCommand(CodemodTest):
         import typing as t
 
         import pydantic
-
 
         class Potato(pydantic.BaseModel):
             name: str
