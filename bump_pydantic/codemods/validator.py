@@ -250,7 +250,10 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             updated_node = updated_node.with_changes(params=updated_node.params.with_changes(params=new_params), body=new_body)
             self._should_replace_values_param = False
 
-        if not self._should_be_instance_method and not any(m.matches(d, m.Decorator(decorator=m.Name("classmethod"))) for d in updated_node.decorators):
+        if self._should_be_instance_method:
+            # remove classmethod decorator if it was there
+            updated_node = updated_node.with_changes(decorators=[d for d in updated_node.decorators if not m.matches(d, m.Decorator(decorator=m.Name("classmethod")))])
+        elif not any(m.matches(d, m.Decorator(decorator=m.Name("classmethod"))) for d in updated_node.decorators):
             classmethod_decorator = cst.Decorator(decorator=cst.Name("classmethod"))
             updated_node = updated_node.with_changes(decorators=[*updated_node.decorators, classmethod_decorator])
         self._should_be_instance_method = False
