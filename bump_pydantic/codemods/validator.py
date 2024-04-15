@@ -187,6 +187,37 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         if self._should_add_comment:
             self._should_add_comment = False
             return updated_node
+            # TODO: we need to clear all the values when we do early return, or clear in visit
+
+        if self._should_be_instance_method:
+            if len(updated_node.params.params) < 2:
+                # TODO: add comment
+                self._should_be_instance_method = False
+                return updated_node
+            values_name = updated_node.params.params[1].name.value
+            new_params = [cst.Param(name=cst.Name("self")), *updated_node.params.params[2:]]
+            updated_node = updated_node.with_changes(params=updated_node.params.with_changes(params=new_params))
+            # fix values.get("field")
+            m_values_get = m.Call(
+                func=m.Attribute(value=m.Name(values_name), attr=m.Name("get")),
+                args=[m.Arg(m.SaveMatchedNode(m.SimpleString(), "field"))],
+            )
+            def values_get_replacement(get_call: cst.CSTNode, extracted:dict[str, cst.CSTNode|Sequence[cst.CSTNode]]) -> cst.Attribute:
+                return cst.Attribute(value=cst.Name("self"), attr=cst.Name(cst.ensure_type(extracted["field"], cst.SimpleString).value[1:-1]))
+            updated_node = cst.ensure_type(m.replace(updated_node, m_values_get, values_get_replacement), cst.FunctionDef)
+            # fix values[...]
+            m_values_subscript = m.Subscript(
+                value=m.Name(values_name),
+                slice=[m.SubscriptElement(
+                    slice=m.Index(value=m.SaveMatchedNode(m.SimpleString(), "field")),
+                )]
+            )
+            updated_node = cst.ensure_type(m.replace(updated_node, m_values_subscript, values_get_replacement), cst.FunctionDef)
+            # fix return value
+            updated_node = cst.ensure_type(m.replace(updated_node, m.Return(m.Name(values_name)), cst.Return(value=cst.Name("self"))), cst.FunctionDef)
+            # fix result type
+            updated_node = updated_node.with_changes(returns=cst.Annotation(annotation=cst.Name("Self")))
+            AddImportsVisitor.add_needed_import(self.context, "typing", "Self")
 
         if self._should_replace_values_param:
             new_params: list[cst.Param] = []

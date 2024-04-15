@@ -126,13 +126,17 @@ class TestValidatorCommand(CodemodTest):
 
             @root_validator(skip_on_failure=True)
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
-                if "gateways" not in values and "gateway" in values:
-                    values["gateways"] = values.pop("gateway")
+                if values["name"] == "foo":
+                    values["name"] = "bar"
+                if values.get("dialect") == "foo":
+                    values["dialect"] = "bar"
+                return values
         """
         after = """
         import typing as t
 
         from pydantic import model_validator, BaseModel
+        from typing import Self
 
 
         class Potato(BaseModel):
@@ -140,10 +144,12 @@ class TestValidatorCommand(CodemodTest):
             dialect: str
 
             @model_validator(mode="after")
-            @classmethod
-            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
-                if "gateways" not in values and "gateway" in values:
-                    values["gateways"] = values.pop("gateway")
+            def _normalize_fields(self) -> Self:
+                if self.name == "foo":
+                    self.name = "bar"
+                if self.dialect == "foo":
+                    self.dialect = "bar"
+                return self
         """
         self.assertCodemod(before, after)
 
@@ -341,11 +347,15 @@ class TestValidatorCommand(CodemodTest):
 
             @root_validator(pre=False)
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
-                if "gateways" not in values and "gateway" in values:
-                    values["gateways"] = values.pop("gateway")
+                if values["name"] == "foo":
+                    values["name"] = "bar"
+                if values.get("dialect") == "foo":
+                    values["dialect"] = "bar"
+                return values
         """
         after = """
         from pydantic import model_validator, BaseModel
+        from typing import Self
 
 
         class Potato(BaseModel):
@@ -353,10 +363,12 @@ class TestValidatorCommand(CodemodTest):
             dialect: str
 
             @model_validator(mode="after")
-            @classmethod
-            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
-                if "gateways" not in values and "gateway" in values:
-                    values["gateways"] = values.pop("gateway")
+            def _normalize_fields(self) -> Self:
+                if self.name == "foo":
+                    self.name = "bar"
+                if self.dialect == "foo":
+                    self.dialect = "bar"
+                return self
         """
         self.assertCodemod(before, after)
 
@@ -467,6 +479,7 @@ class TestValidatorCommand(CodemodTest):
         after = """
         import pydantic
         from pydantic import field_validator, BaseModel, Field
+        from typing import Annotated
 
         class Potato(BaseModel):
             response_format: Annotated[str, Field(validate_default=True)]
@@ -569,6 +582,7 @@ class TestValidatorCommand(CodemodTest):
         import typing as t
 
         from pydantic import model_validator, BaseModel
+        from typing import Self
 
 
         class Potato(BaseModel):
@@ -576,9 +590,8 @@ class TestValidatorCommand(CodemodTest):
             dialect: str
 
             @model_validator(mode="after")
-            @classmethod
-            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
-                return values
+            def _normalize_fields(self) -> Self:
+                return self
         """
         self.assertCodemod(before, after)
 
@@ -601,6 +614,7 @@ class TestValidatorCommand(CodemodTest):
         import typing as t
 
         from pydantic import model_validator, BaseModel
+        from typing import Self
 
 
         class Potato(BaseModel):
@@ -608,9 +622,8 @@ class TestValidatorCommand(CodemodTest):
             dialect: str
 
             @model_validator(mode="after")
-            @classmethod
-            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
-                return values
+            def _normalize_fields(self) -> Self:
+                return self
         """
         self.assertCodemod(before, after)
 
