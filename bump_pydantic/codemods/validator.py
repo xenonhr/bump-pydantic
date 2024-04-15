@@ -293,11 +293,12 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         else:
             new_func = cst.Attribute(attr=cst.Name(new_name), value=cst.Name("pydantic"))
 
+        if new_name == "model_validator" and not any(arg.keyword and arg.keyword.value == "mode" for arg in self._args):
+            self._args.append(mode_after)
+
         if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
-            decorator = cst.Call(func=new_func, args=[mode_after])
+            decorator = cst.Call(func=new_func, args=self._args)
         else:
-            if m.matches(node, ROOT_VALIDATOR_DECORATOR) and not any(arg.keyword and arg.keyword.value == "mode" for arg in self._args):
-                self._args.append(mode_after)
             decorator = node.decorator.with_changes(func=new_func, args=self._args)
         return node.with_changes(decorator=decorator)
 
