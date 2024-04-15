@@ -637,12 +637,15 @@ class TestValidatorCommand(CodemodTest):
         class Potato(BaseModel):
             name: str
             dialect: str
+            color: str|None = None
 
             @root_validator()
+            @classmethod
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
                 for key in ["name", "dialect"]:
                     if values.get(key) is not None and values[key] == "foo":
                         values[key] = "bar"
+                values["color"] = values.get("color", "red") + "_color"
                 return values
         """
         after = """
@@ -655,12 +658,14 @@ class TestValidatorCommand(CodemodTest):
         class Potato(BaseModel):
             name: str
             dialect: str
+            color: str|None = None
 
             @model_validator(mode="after")
             def _normalize_fields(self) -> Self:
                 for key in ["name", "dialect"]:
                     if getattr(self, key) is not None and getattr(self, key) == "foo":
                         setattr(self, key, "bar")
+                self.color = (self.color or "red") + "_color"
                 return self
         """
         self.assertCodemod(before, after)

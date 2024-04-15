@@ -200,14 +200,25 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             # fix values.get("field")
             m_values_get = m.Call(
                 func=m.Attribute(value=m.Name(values_name), attr=m.Name("get")),
-                args=[m.Arg(m.SaveMatchedNode(m.DoNotCare(), "field"))],
+                args=[m.Arg(m.SaveMatchedNode(m.DoNotCare(), "field")), m.ZeroOrOne(m.Arg(m.SaveMatchedNode(m.DoNotCare(), "default")))],
             )
             def values_get_replacement(get_call: cst.CSTNode, extracted:dict[str, cst.CSTNode|Sequence[cst.CSTNode]]) -> cst.CSTNode:
                 field = extracted["field"]
+                default = extracted.get("default")
                 if isinstance(field, cst.SimpleString):
-                    return cst.Attribute(value=cst.Name("self"), attr=cst.Name(field.value[1:-1]))
+                    self_field = cst.Attribute(value=cst.Name("self"), attr=cst.Name(field.value[1:-1]))
+                    if default:
+                        return cst.BooleanOperation(
+                            left=self_field,
+                            operator=cst.Or(),
+                            right=cst.ensure_type(default, cst.BaseExpression),
+                            lpar=[cst.LeftParen()],
+                            rpar=[cst.RightParen()],
+                        )
+                    return self_field
                 elif isinstance(field, cst.BaseExpression):
-                    return cst.Call(func=cst.Name("getattr"), args=[cst.Arg(value=cst.Name("self")), cst.Arg(value=field)])
+                    default_arg = [cst.Arg(value=cst.ensure_type(default, cst.BaseExpression))] if default else []
+                    return cst.Call(func=cst.Name("getattr"), args=[cst.Arg(value=cst.Name("self")), cst.Arg(value=field)] + default_arg)
                 return get_call
             updated_node = cst.ensure_type(m.replace(updated_node, m_values_get, values_get_replacement), cst.FunctionDef)
             # fix values[...] = ...
