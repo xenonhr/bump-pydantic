@@ -11,6 +11,7 @@ from bump_pydantic.codemods.custom_types import CustomTypeCodemod
 from bump_pydantic.codemods.field import FieldCodemod
 from bump_pydantic.codemods.ormar import OrmarCodemod
 from bump_pydantic.codemods.replace_config import ReplaceConfigCodemod
+from bump_pydantic.codemods.replace_functions import ReplaceFunctionsCodemod
 from bump_pydantic.codemods.replace_generic_model import ReplaceGenericModelCommand
 from bump_pydantic.codemods.replace_imports import ReplaceImportsCodemod
 from bump_pydantic.codemods.replace_model_attribute_access import ReplaceModelAttributeAccessCommand
@@ -41,6 +42,8 @@ class Rule(str, Enum):
     """Add type annotations to fields that are missing them."""
     BP011 = "BP011"
     """Replace `model.<old_attribute>` with `model.<new_attribute>`."""
+    BP012 = "BP012"
+    """Replace `parse_obj_as`, `parse_raw_as` with TypeAdapter."""
     BO001 = "BO001"
     """Update Ormar models."""
 
@@ -81,6 +84,9 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
 
     if Rule.BP011 not in disabled:
         codemods.append(ReplaceModelAttributeAccessCommand)
+
+    if Rule.BP012 not in disabled:
+        codemods.append(ReplaceFunctionsCodemod)
 
     if Rule.BO001 not in disabled:
         codemods.append(OrmarCodemod)
