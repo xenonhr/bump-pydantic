@@ -90,6 +90,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         self._fields_needing_validate_default = defaultdict[cst.ClassDef, set[str]](set)
         self._class_stack: list[cst.ClassDef] = []
         self._need_field_import = False
+        self._should_be_instance_method = False
 
     @m.visit(IMPORT_VALIDATOR)
     def visit_import_validator(self, node: cst.CSTNode) -> None:
@@ -159,7 +160,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             self._should_add_comment = True
 
     @m.leave(ROOT_VALIDATOR_DECORATOR|BARE_ROOT_VALIDATOR_DECORATOR)
-    def leave_root_validator_func(self, original_node: cst.Decorator, updated_node: cst.Decorator) -> cst.Decorator:
+    def leave_root_validator_decorato(self, original_node: cst.Decorator, updated_node: cst.Decorator) -> cst.Decorator:
         if self._has_comment:
             return updated_node
 
@@ -198,9 +199,10 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             updated_node = updated_node.with_changes(params=updated_node.params.with_changes(params=new_params), body=new_body)
             self._should_replace_values_param = False
 
-        if not any(m.matches(d, m.Decorator(decorator=m.Name("classmethod"))) for d in updated_node.decorators):
+        if not self._should_be_instance_method and not any(m.matches(d, m.Decorator(decorator=m.Name("classmethod"))) for d in updated_node.decorators):
             classmethod_decorator = cst.Decorator(decorator=cst.Name("classmethod"))
             updated_node = updated_node.with_changes(decorators=[*updated_node.decorators, classmethod_decorator])
+        self._should_be_instance_method = False
         return updated_node
 
     def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
@@ -293,8 +295,13 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         else:
             new_func = cst.Attribute(attr=cst.Name(new_name), value=cst.Name("pydantic"))
 
-        if new_name == "model_validator" and not any(arg.keyword and arg.keyword.value == "mode" for arg in self._args):
-            self._args.append(mode_after)
+        if new_name == "model_validator":
+            mode = next((arg for arg in self._args if arg.keyword and arg.keyword.value == "mode"), None)
+            if mode is None:
+                self._args.append(mode_after)
+                mode = "after"
+            if mode == "after":
+                self._should_be_instance_method = True
 
         if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
             decorator = cst.Call(func=new_func, args=self._args)
