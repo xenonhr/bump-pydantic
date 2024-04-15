@@ -200,18 +200,38 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
             # fix values.get("field")
             m_values_get = m.Call(
                 func=m.Attribute(value=m.Name(values_name), attr=m.Name("get")),
-                args=[m.Arg(m.SaveMatchedNode(m.SimpleString(), "field"))],
+                args=[m.Arg(m.SaveMatchedNode(m.DoNotCare(), "field"))],
             )
-            def values_get_replacement(get_call: cst.CSTNode, extracted:dict[str, cst.CSTNode|Sequence[cst.CSTNode]]) -> cst.Attribute:
-                return cst.Attribute(value=cst.Name("self"), attr=cst.Name(cst.ensure_type(extracted["field"], cst.SimpleString).value[1:-1]))
+            def values_get_replacement(get_call: cst.CSTNode, extracted:dict[str, cst.CSTNode|Sequence[cst.CSTNode]]) -> cst.CSTNode:
+                field = extracted["field"]
+                if isinstance(field, cst.SimpleString):
+                    return cst.Attribute(value=cst.Name("self"), attr=cst.Name(field.value[1:-1]))
+                elif isinstance(field, cst.BaseExpression):
+                    return cst.Call(func=cst.Name("getattr"), args=[cst.Arg(value=cst.Name("self")), cst.Arg(value=field)])
+                return get_call
             updated_node = cst.ensure_type(m.replace(updated_node, m_values_get, values_get_replacement), cst.FunctionDef)
-            # fix values[...]
+            # fix values[...] = ...
             m_values_subscript = m.Subscript(
                 value=m.Name(values_name),
                 slice=[m.SubscriptElement(
-                    slice=m.Index(value=m.SaveMatchedNode(m.SimpleString(), "field")),
+                    slice=m.Index(value=m.SaveMatchedNode(m.DoNotCare(), "field")),
                 )]
             )
+            m_values_set = m.Assign(
+                targets=[m.AssignTarget(target=m_values_subscript)],
+                value=m.SaveMatchedNode(m.DoNotCare(), "new_value"),
+            )
+            def values_set_replacement(assign: cst.CSTNode, extracted:dict[str, cst.CSTNode|Sequence[cst.CSTNode]]) -> cst.CSTNode:
+                field = extracted["field"]
+                if isinstance(field, cst.SimpleString):
+                    return assign
+                    # maybe can return assign?
+                    # return assign.with_changes(targets=[cst.AssignTarget(target=cst.Attribute(value=cst.Name("self"), attr=cst.Name(field.value[1:-1])))])
+                elif isinstance(field, cst.BaseExpression):
+                    return cst.Expr(cst.Call(func=cst.Name("setattr"), args=[cst.Arg(value=cst.Name("self")), cst.Arg(value=field), cst.Arg(value=cst.ensure_type(extracted["new_value"], cst.BaseExpression))]))
+                return assign
+            updated_node = cst.ensure_type(m.replace(updated_node, m_values_set, values_set_replacement), cst.FunctionDef)
+            # fix values[...]
             updated_node = cst.ensure_type(m.replace(updated_node, m_values_subscript, values_get_replacement), cst.FunctionDef)
             # fix return value
             updated_node = cst.ensure_type(m.replace(updated_node, m.Return(m.Name(values_name)), cst.Return(value=cst.Name("self"))), cst.FunctionDef)

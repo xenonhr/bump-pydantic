@@ -627,6 +627,44 @@ class TestValidatorCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_root_validator_values_variable(self) -> None:
+        before = """
+        import typing as t
+
+        from pydantic import BaseModel, root_validator
+
+
+        class Potato(BaseModel):
+            name: str
+            dialect: str
+
+            @root_validator()
+            def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+                for key in ["name", "dialect"]:
+                    if values.get(key) is not None and values[key] == "foo":
+                        values[key] = "bar"
+                return values
+        """
+        after = """
+        import typing as t
+
+        from pydantic import model_validator, BaseModel
+        from typing import Self
+
+
+        class Potato(BaseModel):
+            name: str
+            dialect: str
+
+            @model_validator(mode="after")
+            def _normalize_fields(self) -> Self:
+                for key in ["name", "dialect"]:
+                    if getattr(self, key) is not None and getattr(self, key) == "foo":
+                        setattr(self, key, "bar")
+                return self
+        """
+        self.assertCodemod(before, after)
+
     def test_noop_comment(self) -> None:
         code = """
         import typing as t
