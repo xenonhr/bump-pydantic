@@ -55,9 +55,9 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
             annotation = cst.Name("bool")
         elif m.matches(updated_node.value, m.Float()):
             annotation = cst.Name("float")
-        elif (fqn := self.get_metadata(NonCachedTypeInferenceProvider, original_node.targets[0].target, None)) and fqn != "typing.Any":
-            if fqn.startswith("typing.Type[") and fqn == self.get_metadata(NonCachedTypeInferenceProvider, original_node.value, None) and isinstance(original_node.value, (cst.Name, cst.Attribute)):
-                # It's probably a `my_field = MyClass` case. Then we can use the class as writen instead
+        elif (fqn := self.get_metadata(NonCachedTypeInferenceProvider, original_node.value, None)) and fqn != "typing.Any":
+            if fqn.startswith("typing.Type[") and fqn == self.get_metadata(NonCachedTypeInferenceProvider, original_node.targets[0].target, None) and isinstance(original_node.value, (cst.Name, cst.Attribute)):
+                # It's probably a `my_field = MyClass` case. Then we can use the class as written instead
                 # of the fqn.
                 annotation = cst.Subscript(value=cst.Name("Type"), slice=[cst.SubscriptElement(slice=cst.Index(value=original_node.value))])
                 AddImportsVisitor.add_needed_import(self.context, "typing", "Type")
