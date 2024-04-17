@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import operator
+from typing import Sequence
 
 import libcst as cst
 from attr import dataclass
@@ -30,6 +31,7 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
         super().__init__(context)
 
         self._class_stack: list[ClassInfo] = []
+        self._imports_to_replace: dict[str, str] = {}
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
         ormar_model_bases = self.context.scratch[ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY].known_members
@@ -96,7 +98,9 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
             base_is_default = any(fqn.name == "ormar.ModelMeta" for fqn in base_fqn_set)
             if not base_is_default:
                 if isinstance(base, cst.Name):
-                    base = base.with_changes(value=self._config_name_from_class_name(base.value))
+                    new_name = self._config_name_from_class_name(base.value)
+                    self._imports_to_replace[base.value] = new_name
+                    base = base.with_changes(value=new_name)
                 elif isinstance(base, cst.Attribute):
                     base = base.with_changes(attr=cst.Name(self._config_name_from_class_name(base.attr.value)))
                 config_func = cst.Attribute(
@@ -125,3 +129,21 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
                 cst.EmptyLine(comment=cst.Comment(value=(comment))),
             ]
         )
+
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+        m_import_old = m.ImportFrom(names=[m.ZeroOrMore(), m.ImportAlias(
+            name=m.OneOf(*(m.Name(old) for old in self._imports_to_replace.keys()))
+        ), m.ZeroOrMore()])
+        def update_names(node: cst.CSTNode, extracted:dict[str, cst.CSTNode|Sequence[cst.CSTNode]]) -> cst.CSTNode:
+            if not isinstance(node, cst.ImportFrom) or isinstance(node.names, cst.ImportStar):
+                return node
+            new_names: list[cst.ImportAlias] = []
+            for alias in node.names:
+                if isinstance(alias.name, cst.Name):
+                    new_names.append(alias.with_changes(name=cst.Name(self._imports_to_replace.get(alias.name.value, alias.name.value))))
+                else:
+                    new_names.append(alias)
+            return node.with_changes(names=new_names)
+        updated_node = cst.ensure_type(m.replace(updated_node, m_import_old, update_names), cst.Module)
+        self._imports_to_replace.clear()
+        return updated_node

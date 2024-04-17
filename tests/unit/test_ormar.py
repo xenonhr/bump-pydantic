@@ -124,3 +124,36 @@ class TestOrmarCodemod(CodemodTest):
             favorite: bool = ormar.Boolean(default=False)
         """
         self.assertCodemod(before, after)
+
+
+    def test_replace_base_meta_import(self) -> None:
+        before = """
+        import databases
+        import ormar
+        import sqlalchemy
+        from mybase import BaseMeta
+
+        class Album(ormar.Model):
+            class Meta(BaseMeta):
+                tablename = "albums"
+
+            id: int = ormar.Integer(primary_key=True)
+            name: str = ormar.String(max_length=100)
+            favorite: bool = ormar.Boolean(default=False)
+        """
+        after = """
+        import databases
+        import ormar
+        import sqlalchemy
+        from mybase import base_ormar_config
+
+        class Album(ormar.Model):
+            ormar_config = base_ormar_config.copy(
+                tablename="albums",
+            )
+
+            id: int = ormar.Integer(primary_key=True)
+            name: str = ormar.String(max_length=100)
+            favorite: bool = ormar.Boolean(default=False)
+        """
+        self.assertCodemod(before, after)
