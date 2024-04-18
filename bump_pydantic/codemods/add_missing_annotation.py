@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
@@ -43,7 +45,7 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
     def leave_untyped_member_assign(self, original_node: cst.Assign, updated_node: cst.Assign) -> cst.Assign | cst.AnnAssign:
         ancestors = self.node_stack[-3:]
         if len(ancestors) < 3 or not self._is_pydantic_model(ancestors[0]) or not all(
-            m.matches(parent, matcher) for parent, matcher in zip(self.node_stack[-3:], MEMBER_ASSIGN_ANCESTORS, strict=True)):
+            m.matches(parent, matcher) for parent, matcher in zip(ancestors, MEMBER_ASSIGN_ANCESTORS, strict=True)):
             return updated_node
 
         annotation = None
@@ -62,8 +64,16 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
                 annotation = cst.Subscript(value=cst.Name("Type"), slice=[cst.SubscriptElement(slice=cst.Index(value=original_node.value))])
                 AddImportsVisitor.add_needed_import(self.context, "typing", "Type")
             else:
+                model_name = cst.ensure_type(ancestors[0], cst.ClassDef).name
+                model_type_fqn = self.get_metadata(NonCachedTypeInferenceProvider, model_name, None)
+                model_fqn = (match := re.match(r"typing.Type\[(.*)\]", model_type_fqn or "")) and match[1]
+                if model_fqn and "." in model_fqn:
+                    prefix = model_fqn.rsplit(".", 1)[0]
+                    shortened_fqn = re.sub(rf"\b{re.escape(prefix)}\." , "", fqn)
+                else:
+                    shortened_fqn = fqn
                 try:
-                    annotation = cst.parse_expression(fqn)
+                    annotation = cst.parse_expression(shortened_fqn)
                     root_attr_matcher = m.Attribute(value=m.Name(), attr=m.Name())
                     for attribute in m.findall(annotation, root_attr_matcher):
                         AddImportsVisitor.add_needed_import(self.context, attribute.value.value)
