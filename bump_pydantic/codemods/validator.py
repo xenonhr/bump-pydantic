@@ -15,6 +15,9 @@ REFACTOR_COMMENT = (
 VALIDATOR_COMMENT = REFACTOR_COMMENT.format(old_name="validator", new_name="field_validator")
 ROOT_VALIDATOR_COMMENT = REFACTOR_COMMENT.format(old_name="root_validator", new_name="model_validator")
 CHECK_LINK_COMMENT = "# Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information."
+MODEL_VALIDATOR_BEFORE_COMMENT = (
+    f"{PREFIX_COMMENT}model_validators with mode='before' are not necessarily passed a dict."
+)
 
 def m_name_or_pydantic_attr(name: str) -> m.OneOf[m.BaseExpressionMatchType]:
     return m.Name(name) | m.Attribute(attr=m.Name(name), value=m.Name("pydantic"))
@@ -91,6 +94,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         self._class_stack: list[cst.ClassDef] = []
         self._need_field_import = False
         self._should_be_instance_method = False
+        self._should_add_model_validator_before_comment = False
 
     @m.visit(IMPORT_VALIDATOR)
     def visit_import_validator(self, node: cst.CSTNode) -> None:
@@ -167,7 +171,10 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
         if self._should_add_comment:
             return self._decorator_with_leading_comment(updated_node, ROOT_VALIDATOR_COMMENT)
 
-        return self._replace_validators(updated_node, "root_validator", "model_validator")
+        updated_node = self._replace_validators(updated_node, "root_validator", "model_validator")
+        if self._should_add_model_validator_before_comment:
+            updated_node = self._decorator_with_leading_comment(updated_node, MODEL_VALIDATOR_BEFORE_COMMENT)
+        return updated_node
 
     @m.leave(VALIDATOR_DECORATOR)
     def leave_validator_decorator(self, original_node: cst.Decorator, updated_node: cst.Decorator) -> cst.Decorator:
@@ -183,6 +190,7 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
     def leave_validator_func(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
         self._args = []
         self._has_comment = False
+        self._should_add_model_validator_before_comment = False
 
         if self._should_add_comment:
             self._should_add_comment = False
@@ -367,6 +375,8 @@ class ValidatorCodemod(VisitorBasedCodemodCommand):
                 mode = "after"
             if mode == "after":
                 self._should_be_instance_method = True
+            else:
+                self._should_add_model_validator_before_comment = True
 
         if m.matches(node, BARE_ROOT_VALIDATOR_DECORATOR):
             decorator = cst.Call(func=new_func, args=self._args)

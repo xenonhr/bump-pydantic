@@ -71,6 +71,8 @@ class TestValidatorCommand(CodemodTest):
             name: str
             dialect: str
 
+            # TODO[pydantic]: model_validators with mode='before' are not necessarily passed a dict.
+            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
             @model_validator(mode="before")
             @classmethod
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
@@ -105,6 +107,8 @@ class TestValidatorCommand(CodemodTest):
             name: str
             dialect: str
 
+            # TODO[pydantic]: model_validators with mode='before' are not necessarily passed a dict.
+            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
             @model_validator(mode="before")
             @classmethod
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
@@ -551,6 +555,8 @@ class TestValidatorCommand(CodemodTest):
             name: str
             dialect: str
 
+            # TODO[pydantic]: model_validators with mode='before' are not necessarily passed a dict.
+            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
             @pydantic.model_validator(mode="before")
             @classmethod
             def _normalize_fields(cls, values: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
