@@ -9,7 +9,7 @@ import time
 import traceback
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set, Tuple, Type, TypeVar, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union
 
 import libcst as cst
 from libcst.codemod import CodemodContext, ContextAwareTransformer
@@ -58,6 +58,7 @@ def main(
     diff: bool = Option(False, help="Show diff instead of applying changes."),
     ignore: List[str] = Option(default=DEFAULT_IGNORES, help="Ignore a path glob pattern."),
     log_file: Path = Option("log.txt", help="Log errors to this file."),
+    process_single_file: Optional[Path] = Option(default=None, help="Process a single file."),
     version: bool = Option(
         None,
         "--version",
@@ -138,19 +139,23 @@ def main(
     codemods = gather_codemods(disabled=disable)
 
     partial_run_codemods = functools.partial(run_codemods, codemods, metadata_manager, scratch, package, diff)
-    with Progress(*Progress.get_default_columns(), transient=True) as progress:
-        task = progress.add_task(description="Executing codemods...", total=len(files))
-        difflines: List[List[str]] = []
-        with multiprocessing.Pool(processes=processes) as pool:
-            for error, _difflines in pool.imap_unordered(partial_run_codemods, files):
-                progress.advance(task)
+    if process_single_file:
+        error, _difflines = partial_run_codemods(str(process_single_file.relative_to(".")))
+        difflines = [_difflines] if _difflines is not None else []
+    else:
+        with Progress(*Progress.get_default_columns(), transient=True) as progress:
+            task = progress.add_task(description="Executing codemods...", total=len(files))
+            difflines: List[List[str]] = []
+            with multiprocessing.Pool(processes=processes) as pool:
+                for error, _difflines in pool.imap_unordered(partial_run_codemods, files):
+                    progress.advance(task)
 
-                if _difflines is not None:
-                    difflines.append(_difflines)
+                    if _difflines is not None:
+                        difflines.append(_difflines)
 
-                if error is not None:
-                    count_errors += 1
-                    log_fp.writelines(error)
+                    if error is not None:
+                        count_errors += 1
+                        log_fp.writelines(error)
 
     modified = [Path(f) for f in files if os.stat(f).st_mtime > start_time]
 
