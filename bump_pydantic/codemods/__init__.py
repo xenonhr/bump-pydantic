@@ -54,6 +54,13 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
     if Rule.BP001 not in disabled:
         codemods.append(AddDefaultNoneCommand)
 
+    # These need to run early because TypeInfrenceProvider depends on seeing the right line numbers for the original nodes.
+    if Rule.BP010 not in disabled:
+        codemods.append(AddMissingAnnotationCommand)
+
+    if Rule.BP011 not in disabled:
+        codemods.append(ReplaceModelAttributeAccessCommand)
+
     if Rule.BP002 not in disabled:
         codemods.append(ReplaceConfigCodemod)
 
@@ -78,12 +85,6 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
 
     if Rule.BP009 not in disabled:
         codemods.append(CustomTypeCodemod)
-
-    if Rule.BP010 not in disabled:
-        codemods.append(AddMissingAnnotationCommand)
-
-    if Rule.BP011 not in disabled:
-        codemods.append(ReplaceModelAttributeAccessCommand)
 
     if Rule.BP012 not in disabled:
         codemods.append(ReplaceFunctionsCodemod)
