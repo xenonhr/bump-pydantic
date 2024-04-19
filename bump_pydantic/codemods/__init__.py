@@ -17,6 +17,7 @@ from bump_pydantic.codemods.replace_imports import ReplaceImportsCodemod
 from bump_pydantic.codemods.replace_model_attribute_access import ReplaceModelAttributeAccessCommand
 from bump_pydantic.codemods.root_model import RootModelCommand
 from bump_pydantic.codemods.validator import ValidatorCodemod
+from bump_pydantic.codemods.warn_replaced_overrides import WarnReplacedOverridesCommand
 
 
 class Rule(str, Enum):
@@ -44,6 +45,8 @@ class Rule(str, Enum):
     """Replace `model.<old_attribute>` with `model.<new_attribute>`."""
     BP012 = "BP012"
     """Replace `parse_obj_as`, `parse_raw_as` with TypeAdapter."""
+    BP013 = "BP013"
+    """Add a TODO on overrides of deprecated methods like `dict` or `json`."""
     BO001 = "BO001"
     """Update Ormar models."""
 
@@ -88,6 +91,9 @@ def gather_codemods(disabled: List[Rule]) -> List[Type[ContextAwareTransformer]]
 
     if Rule.BP012 not in disabled:
         codemods.append(ReplaceFunctionsCodemod)
+
+    if Rule.BP013 not in disabled:
+        codemods.append(WarnReplacedOverridesCommand)
 
     if Rule.BO001 not in disabled:
         codemods.append(OrmarCodemod)
