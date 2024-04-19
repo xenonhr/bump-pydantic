@@ -69,14 +69,18 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
                 model_fqn = (match := re.match(r"typing.Type\[(.*)\]", model_type_fqn or "")) and match[1]
                 if model_fqn and "." in model_fqn:
                     prefix = model_fqn.rsplit(".", 1)[0]
+                    skip_import = [match[1] for match in re.finditer(rf"\b{re.escape(prefix)}\.(\w+)", fqn)]
                     shortened_fqn = re.sub(rf"\b{re.escape(prefix)}\." , "", fqn)
                 else:
+                    skip_import = []
                     shortened_fqn = fqn
                 try:
                     annotation = cst.parse_expression(shortened_fqn)
                     root_attr_matcher = m.Attribute(value=m.Name(), attr=m.Name())
                     for attribute in m.findall(annotation, root_attr_matcher):
-                        AddImportsVisitor.add_needed_import(self.context, attribute.value.value)
+                        attr_value = cst.ensure_type(cst.ensure_type(attribute, cst.Attribute).value, cst.Name).value
+                        if attr_value not in skip_import:
+                            AddImportsVisitor.add_needed_import(self.context, attr_value)
                 except cst.ParserSyntaxError:
                     pass
 
