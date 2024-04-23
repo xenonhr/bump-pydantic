@@ -93,3 +93,30 @@ class TestReplaceFunctions(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_replace_moved(self) -> None:
+        before = """
+        from typing import List
+
+        from pydantic import validate_arguments
+
+        @validate_arguments
+        def foo(x: int) -> int:
+            return x
+
+        pydantic.utils.deep_update({'a': 1}, {'b': 2})
+        """
+        after = """
+        from typing import List
+
+        from pydantic import validate_arguments
+        import pydantic.v1.utils
+        from pydantic.deprecated.decorator import validate_arguments
+
+        @validate_arguments
+        def foo(x: int) -> int:
+            return x
+
+        pydantic.v1.utils.deep_update({'a': 1}, {'b': 2})
+        """
+        self.assertCodemod(before, after)
+
