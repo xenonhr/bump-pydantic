@@ -48,6 +48,8 @@ class ReplaceModelAttributeAccessCommand(VisitorBasedCodemodCommand):
         if not fqn:
             # We don't know what this is! Warn?
             return updated_node
+        if (match := re.match(r"typing\.Optional\[(.*)\]", fqn)):
+            fqn = match.group(1)
         if (match := re.match(r"typing\.Type\[(.*)\]", fqn)):
             fqn = match.group(1)
         if fqn in self.pydantic_model_bases:
