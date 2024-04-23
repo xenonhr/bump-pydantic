@@ -36,6 +36,7 @@ IMPORTS = {
         "PaymentCardNumber",
     ),
     "typing:TypedDict": ("typing_extensions", "TypedDict"),
+    "pydantic.error_wrappers:ValidationError": ("pydantic", "ValidationError"),
 }
 
 

@@ -39,6 +39,8 @@ JSON_LOADS_DUMP_JSON = m.Call(
     ],
 )
 
+ERROR_WRAPPERS_VALIDATION_ERROR = m.Attribute(attr=m.Name("ValidationError"), value=m.Attribute(attr=m.Name("error_wrappers"), value=m.Name("pydantic")))
+
 class ReplaceFunctionsCodemod(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
@@ -86,3 +88,8 @@ class ReplaceFunctionsCodemod(VisitorBasedCodemodCommand):
                 equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace(""))
             ), *model_call.args
         ])
+
+    @m.leave(ERROR_WRAPPERS_VALIDATION_ERROR)
+    def leave_error_wrappers_validation_error(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.Attribute:
+        AddImportsVisitor.add_needed_import(context=self.context, module="pydantic")
+        return updated_node.with_changes(value=cst.Name("pydantic"))
