@@ -2,6 +2,7 @@ import libcst as cst
 from libcst import matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor, RemoveImportsVisitor
+from pyexpat import model
 
 
 def m_import_from_pydantic(name: str) -> m.ImportFrom:
@@ -21,6 +22,22 @@ TYPE_ADAPTER_REPLACEMENTS = {
     "parse_raw_as": "validate_json",
     "parse_obj_as": "validate_python",
 }
+
+JSON_LOADS_DUMP_JSON = m.Call(
+    func=m.Attribute(value=m.Name("json"), attr=m.Name("loads")),
+    args=[
+        m.Arg(
+            value=m.SaveMatchedNode(m.Call(
+                func=m.Attribute(
+                    value=m.DoNotCare(),
+                    attr=m.Name(
+                        value="model_dump_json",
+                    ),
+                ),
+            ), "model_call"),
+        ),
+    ],
+)
 
 class ReplaceFunctionsCodemod(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext) -> None:
@@ -56,3 +73,16 @@ class ReplaceFunctionsCodemod(VisitorBasedCodemodCommand):
         )
         return updated_node.with_changes(func=new_func, args=updated_node.args[1:])
 
+    @m.leave(JSON_LOADS_DUMP_JSON)
+    def leave_json_loads_dump_json(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
+        extracted = m.extract(updated_node, JSON_LOADS_DUMP_JSON)
+        if extracted is None:
+            return updated_node
+        model_call = cst.ensure_type(extracted.get("model_call"), cst.Call)
+        return model_call.with_changes(func=model_call.func.with_changes(attr=cst.Name("model_dump")), args=[
+            cst.Arg(
+                keyword=cst.Name("mode"),
+                value=cst.SimpleString('"json"'),
+                equal=cst.AssignEqual(cst.SimpleWhitespace(""), cst.SimpleWhitespace(""))
+            ), *model_call.args
+        ])

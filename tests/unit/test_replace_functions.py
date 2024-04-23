@@ -69,3 +69,27 @@ class TestReplaceFunctions(CodemodTest):
         users = TypeAdapter(Users).validate_json(some_json_string)
         """
         self.assertCodemod(before, after)
+
+    def test_replace_json_loads_dump(self) -> None:
+        before = """
+        from typing import List
+
+        from pydantic import BaseModel
+
+        class User(BaseModel):
+            name: str
+
+        jsonable_user = json.loads(User(name="Bob").model_dump_json())
+        """
+        after = """
+        from typing import List
+
+        from pydantic import BaseModel
+
+        class User(BaseModel):
+            name: str
+
+        jsonable_user = User(name="Bob").model_dump(mode="json")
+        """
+        self.assertCodemod(before, after)
+
