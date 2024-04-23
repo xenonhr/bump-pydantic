@@ -52,6 +52,10 @@ class ReplaceModelAttributeAccessCommand(VisitorBasedCodemodCommand):
             fqn = match.group(1)
         if (match := re.match(r"typing\.Type\[(.*)\]", fqn)):
             fqn = match.group(1)
+        if (match := re.match(r"typing\.Union\[(.*)\]", fqn)):
+            all_fqns = [s.strip() for s in match.group(1).split(",")]
+            if all(fqn in self.pydantic_model_bases for fqn in all_fqns):
+                fqn = all_fqns[0]
         if fqn in self.pydantic_model_bases:
             return updated_node.with_changes(attr=cst.Name(ATTRIBUTE_MAP[old_attr]))
         return updated_node
