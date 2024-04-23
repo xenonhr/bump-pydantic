@@ -63,6 +63,9 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
                 # of the fqn.
                 annotation = cst.Subscript(value=cst.Name("Type"), slice=[cst.SubscriptElement(slice=cst.Index(value=original_node.value))])
                 AddImportsVisitor.add_needed_import(self.context, "typing", "Type")
+            elif fqn.startswith("classmethod["):
+                # Sometimes people write things like _normalize_uuid = pydantic.validator(...)
+                pass
             else:
                 model_name = cst.ensure_type(ancestors[0], cst.ClassDef).name
                 model_type_fqn = self.get_metadata(NonCachedTypeInferenceProvider, model_name, None)
