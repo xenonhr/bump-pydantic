@@ -377,3 +377,22 @@ class TestReplaceConfigCommand(CodemodTest):
                 super().__init_subclass__(**kwargs)
         """
         self.assertCodemod(before, after)
+
+
+    def test_model_field(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            model_name: str = "potato"
+            class Config:
+                allow_arbitrary_types = True
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_name: str = "potato"
+            model_config = ConfigDict(allow_arbitrary_types=True, protected_namespaces=())
+        """
+        self.assertCodemod(before, after)

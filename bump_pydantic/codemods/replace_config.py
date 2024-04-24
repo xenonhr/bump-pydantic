@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import List
 
 import libcst as cst
@@ -114,6 +115,12 @@ class Config:
 ```
 """
 
+MEMBER_ANN_ASSIGN_ANCESTORS = [m.ClassDef(), m.IndentedBlock(), m.SimpleStatementLine()]
+
+@dataclass
+class ClassInfo:
+    is_model: bool = False
+    field_starts_with_model: bool = False
 
 class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
     """Replace `Config` class by `ConfigDict` call."""
@@ -128,19 +135,29 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
         self.invalid_config_class = False
         self.inherited_config_class = False
         self.config_args: List[cst.Arg] = []
-        self._is_model_stack: list[bool] = []
+        self.class_stack: list[ClassInfo] = []
         self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+        self.last_class: ClassInfo | None = None
 
     def _is_pydantic_model(self, node: cst.CSTNode) -> bool:
         fqn_set = self.get_metadata(FullyQualifiedNameProvider, node, set())
         return any(fqn.name in self.pydantic_model_bases for fqn in fqn_set)
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        self._is_model_stack.append(self._is_pydantic_model(node))
+        self.class_stack.append(ClassInfo(is_model=self._is_pydantic_model(node)))
 
     def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
-        self._is_model_stack.pop()
+        self.last_class = self.class_stack.pop()
         return updated_node
+
+    def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
+        scope = self.get_metadata(ScopeProvider, node)
+        if not isinstance(scope, ClassScope):
+            return
+        if not isinstance(node.target, cst.Name):
+            return
+        if node.target.value.startswith("model_") and node.target.value != "model_config":
+            self.class_stack[-1].field_starts_with_model = True
 
     @m.visit(m.ClassDef(bases=[m.ZeroOrMore(), m.Arg(value=m.Name("BaseSettings")), m.ZeroOrMore()]))
     def visit_settings_with_config(self, node: cst.ClassDef) -> None:
@@ -148,7 +165,7 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
 
     @m.visit(m.ClassDef(name=m.Name(value="Config")))
     def visit_config_class(self, node: cst.ClassDef) -> None:
-        if not self._is_model_stack or not self._is_model_stack[-1]:
+        if not self.class_stack or not self.class_stack[-1].is_model:
             return
         scope = self.get_metadata(ScopeProvider, node)
         if isinstance(scope, ClassScope):
@@ -251,6 +268,17 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
         if self.invalid_config_class:
             self.invalid_config_class = False
             return updated_node
+        if self.last_class and self.last_class.field_starts_with_model:
+            self.config_args.append(
+                cst.Arg(
+                    keyword=cst.Name("protected_namespaces"),
+                    value=cst.Tuple([]),
+                    equal=cst.AssignEqual(
+                        whitespace_before=cst.SimpleWhitespace(""),
+                        whitespace_after=cst.SimpleWhitespace(""),
+                    ),
+                )
+            )
         if self.is_base_settings:
             needed_import = {"module": "pydantic_settings", "obj": "SettingsConfigDict"}
         else:
