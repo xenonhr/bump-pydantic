@@ -16,6 +16,7 @@ INHERIT_CONFIG_COMMENT = (
     f"{PREFIX_COMMENT}The `Config` class inherits from another class, please create the `model_config` manually."
 )
 CHECK_LINK_COMMENT = "# Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information."
+MODEL_CONFIG_FIELD_COMMENT = f"{PREFIX_COMMENT}Pydantic 2 reserves the name `model_config`; please rename this field."
 
 NEW_DEFAULTS: dict[str, m.BaseMatcherNode] = {
     "smart_union": m.Name(value="True"),
@@ -115,6 +116,28 @@ class Config:
 ```
 """
 
+MODEL_CONFIG_FIELD_LINE = m.SimpleStatementLine(
+    body=[
+        m.ZeroOrMore(),
+        m.AnnAssign(target=m.Name("model_config")),
+        m.ZeroOrMore(),
+    ]
+)
+BASE_MODEL_WITH_MODEL_CONFIG_FIELD = m.ClassDef(
+    bases=[
+        m.ZeroOrMore(),
+        m.Arg(),
+        m.ZeroOrMore(),
+    ],
+    body=m.IndentedBlock(
+        body=[
+            m.ZeroOrMore(),
+            MODEL_CONFIG_FIELD_LINE,
+            m.ZeroOrMore(),
+        ]
+    ),
+)
+
 MEMBER_ANN_ASSIGN_ANCESTORS = [m.ClassDef(), m.IndentedBlock(), m.SimpleStatementLine()]
 
 @dataclass
@@ -138,6 +161,7 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
         self.class_stack: list[ClassInfo] = []
         self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
         self.last_class: ClassInfo | None = None
+        self.needs_model_config_comment = False
 
     def _is_pydantic_model(self, node: cst.CSTNode) -> bool:
         fqn_set = self.get_metadata(FullyQualifiedNameProvider, node, set())
@@ -152,12 +176,26 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
 
     def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
         scope = self.get_metadata(ScopeProvider, node)
-        if not isinstance(scope, ClassScope):
+        if not isinstance(scope, ClassScope) or not self.class_stack or not self.class_stack[-1].is_model:
             return
         if not isinstance(node.target, cst.Name):
             return
+        if node.target.value == "model_config":
+            self.needs_model_config_comment = True
         if node.target.value.startswith("model_") and node.target.value != "model_config":
             self.class_stack[-1].field_starts_with_model = True
+
+    def leave_SimpleStatementLine(self, original_node: cst.SimpleStatementLine, updated_node: cst.SimpleStatementLine) -> cst.SimpleStatementLine:
+        if self.needs_model_config_comment:
+            self.needs_model_config_comment = False
+            return updated_node.with_changes(
+                leading_lines=[
+                    *updated_node.leading_lines,
+                    cst.EmptyLine(comment=cst.Comment(value=MODEL_CONFIG_FIELD_COMMENT)),
+                    cst.EmptyLine(comment=cst.Comment(value=CHECK_LINK_COMMENT)),
+                ]
+            )
+        return updated_node
 
     @m.visit(m.ClassDef(bases=[m.ZeroOrMore(), m.Arg(value=m.Name("BaseSettings")), m.ZeroOrMore()]))
     def visit_settings_with_config(self, node: cst.ClassDef) -> None:
@@ -252,6 +290,10 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
 
     @m.visit(BASE_MODEL_WITH_INVALID_CONFIG)
     def visit_config_class_with_more_than_assignments(self, node: cst.ClassDef) -> None:
+        self.invalid_config_class = True
+
+    @m.visit(BASE_MODEL_WITH_MODEL_CONFIG_FIELD)
+    def visit_model_with_model_config_field(self, node: cst.ClassDef) -> None:
         self.invalid_config_class = True
 
     @m.leave(BASE_MODEL_WITH_CONFIG)

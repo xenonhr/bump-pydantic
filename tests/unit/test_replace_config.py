@@ -378,7 +378,6 @@ class TestReplaceConfigCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
-
     def test_model_field(self) -> None:
         before = """
         from pydantic import BaseModel
@@ -394,5 +393,28 @@ class TestReplaceConfigCommand(CodemodTest):
         class Potato(BaseModel):
             model_name: str = "potato"
             model_config = ConfigDict(allow_arbitrary_types=True, protected_namespaces=())
+        """
+        self.assertCodemod(before, after)
+
+    def test_model_config_field(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            model_config: str = "potato"
+
+        class Potato2:
+            model_config: str = "potato"
+        """
+        after = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            # TODO[pydantic]: Pydantic 2 reserves the name `model_config`; please rename this field.
+            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
+            model_config: str = "potato"
+
+        class Potato2:
+            model_config: str = "potato"
         """
         self.assertCodemod(before, after)
