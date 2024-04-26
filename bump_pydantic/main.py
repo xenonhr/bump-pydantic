@@ -39,11 +39,6 @@ T = TypeVar("T")
 
 DEFAULT_IGNORES = [".venv/**", ".tox/**", ".git/**"]
 
-processes = os.cpu_count()
-# Windows has a limit of 61 processes. See https://github.com/python/cpython/issues/89240.
-if platform.system() == "Windows" and processes is not None:
-    processes = min(processes, 61)
-
 
 def version_callback(value: bool):
     if value:
@@ -59,6 +54,7 @@ def main(
     ignore: List[str] = Option(default=DEFAULT_IGNORES, help="Ignore a path glob pattern."),
     log_file: Path = Option("log.txt", help="Log errors to this file."),
     process_single_file: Optional[Path] = Option(default=None, help="Process a single file."),
+    processes: Optional[int] = Option(default=os.cpu_count(), help="Maximum number of processes to use."),
     version: bool = Option(
         None,
         "--version",
@@ -75,6 +71,10 @@ def main(
     console.log("Start bump-pydantic.")
     # NOTE: LIBCST_PARSER_TYPE=native is required according to https://github.com/Instagram/LibCST/issues/487.
     os.environ["LIBCST_PARSER_TYPE"] = "native"
+
+    # Windows has a limit of 61 processes. See https://github.com/python/cpython/issues/89240.
+    if platform.system() == "Windows" and processes is not None:
+        processes = min(processes, 61)
 
     if os.path.isfile(path):
         package = path.parent
