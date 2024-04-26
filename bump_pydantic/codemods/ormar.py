@@ -14,7 +14,8 @@ from libcst.metadata import FullyQualifiedNameProvider
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
 META_LINE_MATCHER = m.SimpleStatementLine(body=[m.SaveMatchedNode(m.ZeroOrMore(m.Assign(targets=[m.AssignTarget(m.Name())])), "assigns")])
-META_BODY_MATCHER = m.IndentedBlock(body=[m.ZeroOrMore(META_LINE_MATCHER)])
+DOCSTRING_MATCHER = m.SimpleStatementLine(body=[m.Expr(value=m.SimpleString())])
+META_BODY_MATCHER = m.IndentedBlock(body=[m.ZeroOrMore(META_LINE_MATCHER | DOCSTRING_MATCHER)])
 
 
 @dataclass(frozen=True)
