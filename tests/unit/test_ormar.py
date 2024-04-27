@@ -198,3 +198,43 @@ class TestOrmarCodemod(CodemodTest):
             favorite: bool = ormar.Boolean(default=False)
         """
         self.assertCodemod(before, after)
+
+
+    def test_replace_base_meta_multiword(self) -> None:
+        before = """
+        import databases
+        import ormar
+        import sqlalchemy
+
+        class MyBaseMeta(ormar.ModelMeta):
+            database = databases.Database("sqlite:///db.sqlite")
+            metadata = sqlalchemy.MetaData()
+
+        class Album(ormar.Model):
+            class Meta(MyBaseMeta):
+                tablename = "albums"
+
+            id: int = ormar.Integer(primary_key=True)
+            name: str = ormar.String(max_length=100)
+            favorite: bool = ormar.Boolean(default=False)
+        """
+        after = """
+        import databases
+        import ormar
+        import sqlalchemy
+
+        my_base_ormar_config = ormar.OrmarConfig(
+            database=databases.Database("sqlite:///db.sqlite"),
+            metadata=sqlalchemy.MetaData(),
+        )
+
+        class Album(ormar.Model):
+            ormar_config = my_base_ormar_config.copy(
+                tablename="albums",
+            )
+
+            id: int = ormar.Integer(primary_key=True)
+            name: str = ormar.String(max_length=100)
+            favorite: bool = ormar.Boolean(default=False)
+        """
+        self.assertCodemod(before, after)

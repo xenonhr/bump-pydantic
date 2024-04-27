@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import operator
+import re
 from typing import Sequence
 
 import libcst as cst
@@ -68,7 +69,8 @@ class OrmarCodemod(VisitorBasedCodemodCommand):
         return updated_node
 
     def _config_name_from_class_name(self, class_name: str) -> str:
-        return f"{class_name.removesuffix('Meta').lower()}_ormar_config"
+        name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", class_name.removesuffix("Meta")).lower()
+        return f"{name}_ormar_config"
 
     def _meta_into_config(self, original_node: cst.ClassDef, updated_node: cst.ClassDef, ormar_config_name: str = "ormar_config") -> cst.SimpleStatementLine:
         line_dicts = m.extractall(updated_node.body, META_LINE_MATCHER)
