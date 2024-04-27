@@ -147,7 +147,7 @@ def main(
     codemods = gather_codemods(disabled=disable)
 
     partial_run_codemods = functools.partial(run_codemods_batched, codemods, metadata_manager, scratch, package, diff)
-    batch_size = 100
+    batch_size = 16
     if process_single_file:
         error, difflines = partial_run_codemods([str(process_single_file.relative_to("."))])
     else:
