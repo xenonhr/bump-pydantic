@@ -418,3 +418,19 @@ class TestReplaceConfigCommand(CodemodTest):
             model_config: str = "potato"
         """
         self.assertCodemod(before, after)
+
+    def test_model_field_add_config(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            model_name: str = "potato"
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_config = ConfigDict(protected_namespaces=())
+            model_name: str = "potato"
+        """
+        self.assertCodemod(before, after)

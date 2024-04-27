@@ -137,6 +137,20 @@ BASE_MODEL_WITH_MODEL_CONFIG_FIELD = m.ClassDef(
         ]
     ),
 )
+BASE_MODEL_WITHOUT_CONFIG = m.ClassDef(
+    bases=[
+        m.ZeroOrMore(),
+        m.Arg(),
+        m.ZeroOrMore(),
+    ],
+    body=(~m.IndentedBlock(
+        body=[
+            m.ZeroOrMore(),
+            m.ClassDef(name=m.Name(value="Config")),
+            m.ZeroOrMore(),
+        ]
+    )),
+)
 
 MEMBER_ANN_ASSIGN_ANCESTORS = [m.ClassDef(), m.IndentedBlock(), m.SimpleStatementLine()]
 
@@ -296,14 +310,17 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
     def visit_model_with_model_config_field(self, node: cst.ClassDef) -> None:
         self.invalid_config_class = True
 
-    @m.leave(BASE_MODEL_WITH_CONFIG)
-    def leave_config_class_childless(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
+    @m.leave(BASE_MODEL_WITH_CONFIG|BASE_MODEL_WITHOUT_CONFIG)
+    def leave_model_possibly_with_config(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
         """Replace the `Config` class with a `model_config` attribute.
 
         Any class that contains a `Config` class will have that class replaced
         with a `model_config` attribute. The `model_config` attribute will be
         assigned a `ConfigDict` object with the same arguments as the attributes
         from `Config` class.
+
+        If we have determined that we need to add config keys, but there is no
+        `Config` class, we will add the `model_config` attribute.
         """
         if not self._is_pydantic_model(original_node):
             return original_node
@@ -321,29 +338,39 @@ class ReplaceConfigCodemod(VisitorBasedCodemodCommand):
                     ),
                 )
             )
+
+        has_config_class = m.matches(updated_node, BASE_MODEL_WITH_CONFIG)
+        if not has_config_class and not self.config_args:
+            return updated_node
+
         if self.is_base_settings:
-            needed_import = {"module": "pydantic_settings", "obj": "SettingsConfigDict"}
+            config_module, config_name = "pydantic_settings", "SettingsConfigDict"
         else:
-            needed_import = {"module": "pydantic", "obj": "ConfigDict"}
-        AddImportsVisitor.add_needed_import(context=self.context, **needed_import)  # type: ignore[arg-type]
+            config_module, config_name = "pydantic", "ConfigDict"
+        AddImportsVisitor.add_needed_import(self.context, config_module, config_name)
+        config_dict_statement = cst.SimpleStatementLine(
+            body=[
+                cst.Assign(
+                    targets=[cst.AssignTarget(target=cst.Name("model_config"))],
+                    value=cst.Call(
+                        func=cst.Name(config_name),
+                        args=self.config_args,
+                    ),
+                )
+            ],
+            leading_lines=self._leading_lines_from_removed_keys(self.config_args),
+        )
+
         block = cst.ensure_type(updated_node.body, cst.IndentedBlock)
-        body = [
-            cst.SimpleStatementLine(
-                body=[
-                    cst.Assign(
-                        targets=[cst.AssignTarget(target=cst.Name("model_config"))],
-                        value=cst.Call(
-                            func=cst.Name("SettingsConfigDict" if self.is_base_settings else "ConfigDict"),
-                            args=self.config_args,
-                        ),
-                    )
-                ],
-                leading_lines=self._leading_lines_from_removed_keys(self.config_args),
-            )
-            if m.matches(statement, m.ClassDef(name=m.Name(value="Config")))
-            else statement
-            for statement in block.body
-        ]
+        if has_config_class:
+            body = [
+                config_dict_statement
+                if m.matches(statement, m.ClassDef(name=m.Name(value="Config")))
+                else statement
+                for statement in block.body
+            ]
+        else:
+            body = [config_dict_statement, *block.body]
         self.is_base_settings = False
         self.config_args = []
         return updated_node.with_changes(body=updated_node.body.with_changes(body=body))
