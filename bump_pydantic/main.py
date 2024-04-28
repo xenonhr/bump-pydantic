@@ -192,7 +192,7 @@ def run_codemods_batched(
 ) -> Tuple[list[str], list[list[str]]]:
     errors: list[str] = []
     diffs: List[List[str]] = []
-    NonCachedTypeInferenceProvider.cache_batch(filenames)
+    NonCachedTypeInferenceProvider.cache_batch([str(Path(f).resolve()) for f in filenames])
     for filename in filenames:
         one_error, one_difflines = run_codemods(codemods, metadata_manager, scratch, package, diff, filename)
 
