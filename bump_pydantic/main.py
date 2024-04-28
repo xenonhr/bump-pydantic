@@ -178,7 +178,7 @@ def main(
     partial_run_codemods_with_pyre_data = functools.partial(splat_args, partial_run_codemods)
     partial_run_codemods_batched = functools.partial(run_codemods_batched, codemods, metadata_manager, scratch, package, diff)
 
-    batch_size = 16
+    batch_size = 40
     difflines: List[List[str]] = []
     files_to_process = [str(process_single_file.relative_to("."))] if process_single_file else files
     with Progress(*Progress.get_default_columns(), transient=True) as progress:
