@@ -25,7 +25,6 @@ from typing import (
 )
 
 import libcst as cst
-import scipy as sp
 from libcst.codemod import CodemodContext, ContextAwareTransformer
 from libcst.helpers import calculate_module_and_package
 from libcst.metadata import (
@@ -177,19 +176,27 @@ def main(
 
     partial_run_codemods = functools.partial(run_codemods, codemods, metadata_manager, scratch, package, diff)
     partial_run_codemods_with_pyre_data = functools.partial(splat_args, partial_run_codemods)
+    partial_run_codemods_batched = functools.partial(run_codemods_batched, codemods, metadata_manager, scratch, package, diff)
+
     batch_size = 16
     difflines: List[List[str]] = []
     files_to_process = [str(process_single_file.relative_to("."))] if process_single_file else files
     with Progress(*Progress.get_default_columns(), transient=True) as progress:
         task = progress.add_task(description="Executing codemods...", total=len(files_to_process))
         with multiprocessing.Pool(processes=processes) as pool:
-            for one_error, one_difflines in pool.imap_unordered(partial_run_codemods_with_pyre_data, path_and_pyre_data(files_to_process, batch_size)):
-                progress.advance(task)
-                if one_error is not None:
-                    count_errors += 1
-                    log_fp.writelines(one_error)
-                if one_difflines is not None:
-                    difflines.append(one_difflines)
+            # for one_error, one_difflines in pool.imap_unordered(partial_run_codemods_with_pyre_data, path_and_pyre_data(files_to_process, batch_size)):
+            #     progress.advance(task)
+            #     if one_error is not None:
+            #         count_errors += 1
+            #         log_fp.writelines(one_error)
+            #     if one_difflines is not None:
+            #         difflines.append(one_difflines)
+            for batch_errors, batch_diffs in pool.imap_unordered(partial_run_codemods_batched, batch_iterator(files, batch_size)):
+                progress.advance(task, batch_size)
+                difflines.extend(batch_diffs)
+                if batch_errors:
+                    count_errors += len(batch_errors)
+                    log_fp.writelines(batch_errors)
 
     modified = [Path(f) for f in files if os.stat(f).st_mtime > start_time]
 
@@ -263,6 +270,28 @@ def scan_for_classes(files: list[str], metadata_manager: FullRepoManager, scratc
                 # log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
                 continue
     return errors
+
+
+def run_codemods_batched(
+    codemods: List[Type[ContextAwareTransformer]],
+    metadata_manager: FullRepoManager,
+    scratch: Dict[str, Any],
+    package: Path,
+    diff: bool,
+    filenames: list[str],
+) -> Tuple[list[str], list[list[str]]]:
+    errors: list[str] = []
+    diffs: List[List[str]] = []
+    NonCachedTypeInferenceProvider.cache_batch(NonCachedTypeInferenceProvider.query_batch([path_for_pyre(f) for f in filenames]))
+    for filename in filenames:
+        one_error, one_difflines = run_codemods(codemods, metadata_manager, scratch, package, diff, filename)
+
+        if one_difflines is not None:
+            diffs.append(one_difflines)
+
+        if one_error is not None:
+            errors.append(one_error)
+    return errors, diffs
 
 
 def run_codemods(
