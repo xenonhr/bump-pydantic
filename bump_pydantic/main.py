@@ -70,7 +70,7 @@ def batch_iterator(iterable:Iterable[_T], n:int) -> Iterable[List[_T]]:
 def path_for_pyre(path: str) -> str:
     return str(Path(path).resolve())
 
-def path_and_pyre_data(paths: Iterable[str], query_batch_size: int = 16) -> Iterable[tuple[str, PyreData|None]]:
+def path_and_pyre_data(paths: Iterable[str], query_batch_size: int) -> Iterable[tuple[str, PyreData|None]]:
     it = iter(paths)
     while (batch := list(itertools.islice(it, query_batch_size))):
         path_data = NonCachedTypeInferenceProvider.query_batch([path_for_pyre(f) for f in batch])
@@ -91,6 +91,7 @@ def main(
     log_file: Path = Option("log.txt", help="Log errors to this file."),
     process_single_file: Optional[Path] = Option(default=None, help="Process a single file."),
     processes: Optional[int] = Option(default=os.cpu_count(), help="Maximum number of processes to use."),
+    batch_size: int = Option(default=40, help="Number of files to process in a batch."),
     version: bool = Option(
         None,
         "--version",
@@ -178,7 +179,6 @@ def main(
     partial_run_codemods_with_pyre_data = functools.partial(splat_args, partial_run_codemods)
     partial_run_codemods_batched = functools.partial(run_codemods_batched, codemods, metadata_manager, scratch, package, diff)
 
-    batch_size = 40
     difflines: List[List[str]] = []
     files_to_process = [str(process_single_file.relative_to("."))] if process_single_file else files
     with Progress(*Progress.get_default_columns(), transient=True) as progress:
