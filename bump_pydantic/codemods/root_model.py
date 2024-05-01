@@ -10,6 +10,7 @@ BASE_MODEL_ARG = m.Arg(value=m.Name("BaseModel") | m.Attribute(value=m.Name("pyd
 BASE_MODEL_MATCHER = m.ClassDef(bases=[m.ZeroOrMore(), BASE_MODEL_ARG, m.ZeroOrMore()])
 # Match the assignment `__root__ = ...`
 ROOT_ASSIGNMENT_MATCHER = m.Assign(targets=[m.AssignTarget(target=m.Name("__root__"))])
+ROOT_ANN_ASSIGNMENT_MATCHER = m.AnnAssign(target=m.Name("__root__"))
 
 
 class RootModelCommand(VisitorBasedCodemodCommand):
@@ -42,6 +43,16 @@ class RootModelCommand(VisitorBasedCodemodCommand):
             return updated_node
 
         self.root_type = updated_node.value
+        return cst.RemoveFromParent()  # type: ignore[return-value]
+
+    @m.leave(ROOT_ANN_ASSIGNMENT_MATCHER)
+    def leave_root_annotated_assignment(self, original_node: cst.AnnAssign, updated_node: cst.AnnAssign) -> cst.AnnAssign:
+        if not self.inside_base_model:
+            return updated_node
+
+        self.root_type = updated_node.annotation.annotation
+        if updated_node.value:
+            return updated_node.with_changes(target=cst.Name("root"))
         return cst.RemoveFromParent()  # type: ignore[return-value]
 
 

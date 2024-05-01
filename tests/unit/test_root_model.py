@@ -50,3 +50,33 @@ class TestReplaceConfigCommand(CodemodTest):
             pass
         """
         self.assertCodemod(before, after)
+
+    def test_root_model_annotated(self) -> None:
+        before = """
+        from pydantic import BaseModel, Field
+
+        class Potato(BaseModel):
+            __root__: Annotated[str, Field(pattern="((^[+-]?[0-9]*\\.?[0-9]+$)|(<\\+.+>.*))")]
+        """
+        after = """
+        from pydantic import RootModel, Field
+
+        class Potato(RootModel[Annotated[str, Field(pattern="((^[+-]?[0-9]*\\.?[0-9]+$)|(<\\+.+>.*))")]]):
+            pass
+        """
+        self.assertCodemod(before, after)
+
+    def test_root_model_annotated_value(self) -> None:
+        before = """
+        from pydantic import BaseModel, Field
+
+        class Potato(BaseModel):
+            __root__: Any = None
+        """
+        after = """
+        from pydantic import RootModel, Field
+
+        class Potato(RootModel[Any]):
+            root: Any = None
+        """
+        self.assertCodemod(before, after)
