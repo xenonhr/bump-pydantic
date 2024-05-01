@@ -12,6 +12,10 @@ BASE_MODEL_MATCHER = m.ClassDef(bases=[m.ZeroOrMore(), BASE_MODEL_ARG, m.ZeroOrM
 ROOT_ASSIGNMENT_MATCHER = m.Assign(targets=[m.AssignTarget(target=m.Name("__root__"))])
 ROOT_ANN_ASSIGNMENT_MATCHER = m.AnnAssign(target=m.Name("__root__"))
 
+# These should check that it's being passed to/accessed on a BaseModel class, but in our repo
+# all uses of __root__ were from Pydantic so we didn't bother.
+CALL_WITH_ROOT_ARG_MATCHER = m.Call(args=[m.Arg(keyword=m.Name(value="__root__")), m.ZeroOrMore()])
+ROOT_ATTR_ACCESS_MATCHER = m.Attribute(attr=m.Name("__root__"))
 
 class RootModelCommand(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext) -> None:
@@ -55,6 +59,20 @@ class RootModelCommand(VisitorBasedCodemodCommand):
             return updated_node.with_changes(target=cst.Name("root"))
         return cst.RemoveFromParent()  # type: ignore[return-value]
 
+    @m.leave(CALL_WITH_ROOT_ARG_MATCHER)
+    def leave_call_with_root_arg(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
+        if not m.matches(updated_node.args[0], m.Arg(keyword=m.Name("__root__"))):
+            return updated_node
+        return updated_node.with_changes(args=[
+            updated_node.args[0].with_changes(keyword=cst.Name("root")),
+            *updated_node.args[1:]
+        ])
+
+    @m.leave(ROOT_ATTR_ACCESS_MATCHER)
+    def leave_root_attr_access(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.Attribute:
+        if not m.matches(updated_node.attr, m.Name("__root__")):
+            return updated_node
+        return updated_node.with_changes(attr=cst.Name("root"))
 
 if __name__ == "__main__":
     import textwrap

@@ -80,3 +80,24 @@ class TestReplaceConfigCommand(CodemodTest):
             root: Any = None
         """
         self.assertCodemod(before, after)
+
+    def test_root_member(self) -> None:
+        before = """
+        from pydantic import BaseModel, Field
+
+        class Potato(BaseModel):
+            __root__: str
+
+        potato = Potato(__root__="hi")
+        r = potato.__root__
+        """
+        after = """
+        from pydantic import RootModel, Field
+
+        class Potato(RootModel[str]):
+            pass
+
+        potato = Potato(root="hi")
+        r = potato.root
+        """
+        self.assertCodemod(before, after)
