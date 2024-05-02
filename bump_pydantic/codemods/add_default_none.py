@@ -43,21 +43,24 @@ class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
 
+        self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+        self.class_stack = list[cst.ClassDef]()
         self.inside_base_model = False
         self.should_add_none = False
 
+    def _inside_pydantic_model(self) -> bool:
+        if not self.class_stack:
+            return False
+        fqn_set = self.get_metadata(FullyQualifiedNameProvider, self.class_stack[-1], set())
+        return any(fqn.name in self.pydantic_model_bases for fqn in fqn_set)
+
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        fqn_set = self.get_metadata(FullyQualifiedNameProvider, node)
-
-        if not fqn_set:
-            return None
-
-        fqn: QualifiedName = next(iter(fqn_set))  # type: ignore
-        if fqn.name in self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members:
-            self.inside_base_model = True
+        self.class_stack.append(node)
+        self.inside_base_model = self._inside_pydantic_model()
 
     def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
-        self.inside_base_model = False
+        self.class_stack.pop()
+        self.inside_base_model = self._inside_pydantic_model()
         return updated_node
 
     def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
