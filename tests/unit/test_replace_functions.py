@@ -120,3 +120,34 @@ class TestReplaceFunctions(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_replace_extra_1(self) -> None:
+        before = """
+        import pydantic
+
+        class Extra:
+            allow = "allow"
+
+        extra = pydantic.Extra.allow
+        non_extra = Extra.allow
+        """
+        after = """
+        import pydantic
+
+        class Extra:
+            allow = "allow"
+
+        extra = "allow"
+        non_extra = Extra.allow
+        """
+        self.assertCodemod(before, after)
+
+    def test_replace_extra_2(self) -> None:
+        before = """
+        from pydantic import Extra
+
+        extra = Extra.allow
+        """
+        after = """
+        extra = "allow"
+        """
+        self.assertCodemod(before, after)

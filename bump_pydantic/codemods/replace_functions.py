@@ -95,20 +95,27 @@ MOVED_IMPORT_MATCHERS = [
     m.ImportFrom(dotted_to_attr_matcher(mod)) for mod in MOVED_BY_MODULE.keys()
 ]
 
+def extra_value_matcher(extra: m.BaseExpressionMatchType) -> m.Attribute:
+    return m.Attribute(value=extra, attr=m.OneOf(*(m.Name(name) for name in ("ignore", "allow", "forbid"))))
+
+PYDANTIC_EXTRA_MATCHER = extra_value_matcher(m.Attribute(value=m.Name("pydantic"), attr=m.Name("Extra")))
+EXTRA_MATCHER = extra_value_matcher(m.Name("Extra"))
+PYDANTIC_IMPORTS_TO_CHECK = ["Extra", *(TYPE_ADAPTER_REPLACEMENTS.keys())]
+
 class ReplaceFunctionsCodemod(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
 
         self.has_import_from_pydantic: dict[str, bool] = {}
 
-    @m.visit(m.OneOf(*(m_import_from_pydantic(old) for old in TYPE_ADAPTER_REPLACEMENTS.keys())))
+    @m.visit(m.OneOf(*(m_import_from_pydantic(old) for old in PYDANTIC_IMPORTS_TO_CHECK)))
     def visit_import_from_pydantic(self, node: cst.ImportFrom) -> None:
         if isinstance(node.names, cst.ImportStar):
-            for key in TYPE_ADAPTER_REPLACEMENTS:
+            for key in PYDANTIC_IMPORTS_TO_CHECK:
                 self.has_import_from_pydantic[key] = True
             return
         for name in node.names:
-            if name.name.value in TYPE_ADAPTER_REPLACEMENTS:
+            if name.name.value in PYDANTIC_IMPORTS_TO_CHECK:
                 self.has_import_from_pydantic[name.name.value] = True
 
     @m.leave(m.OneOf(*(m.Call(func=m_name_or_pydantic_attr(old)) for old in TYPE_ADAPTER_REPLACEMENTS.keys())))
@@ -175,3 +182,10 @@ class ReplaceFunctionsCodemod(VisitorBasedCodemodCommand):
     def leave_error_wrappers_validation_error(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.Attribute:
         AddImportsVisitor.add_needed_import(context=self.context, module="pydantic")
         return updated_node.with_changes(value=cst.Name("pydantic"))
+
+    @m.leave(PYDANTIC_EXTRA_MATCHER | EXTRA_MATCHER)
+    def leave_pydantic_extra(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.Attribute | cst.SimpleString:
+        if m.matches(updated_node, EXTRA_MATCHER) and not self.has_import_from_pydantic.get("Extra", False):
+            return updated_node
+        RemoveImportsVisitor.remove_unused_import(context=self.context, module="pydantic", obj="Extra")
+        return cst.SimpleString(f'"{cst.ensure_type(updated_node.attr, cst.Name).value}"')
