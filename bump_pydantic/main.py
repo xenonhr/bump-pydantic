@@ -181,7 +181,7 @@ def main(
 
     difflines: List[List[str]] = []
     files_to_process = [str(process_single_file.relative_to("."))] if process_single_file else files
-    with Progress(*Progress.get_default_columns(), transient=True) as progress:
+    with Progress(*Progress.get_default_columns(), transient=True, disable=bool(process_single_file)) as progress:
         task = progress.add_task(description="Executing codemods...", total=len(files_to_process))
         with multiprocessing.Pool(processes=processes) as pool:
             # for one_error, one_difflines in pool.imap_unordered(partial_run_codemods_with_pyre_data, path_and_pyre_data(files_to_process, batch_size)):
@@ -191,7 +191,7 @@ def main(
             #         log_fp.writelines(one_error)
             #     if one_difflines is not None:
             #         difflines.append(one_difflines)
-            for batch_errors, batch_diffs in pool.imap_unordered(partial_run_codemods_batched, batch_iterator(files, batch_size)):
+            for batch_errors, batch_diffs in pool.imap_unordered(partial_run_codemods_batched, batch_iterator(files_to_process, batch_size)):
                 progress.advance(task, batch_size)
                 difflines.extend(batch_diffs)
                 if batch_errors:
