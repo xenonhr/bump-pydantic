@@ -85,6 +85,7 @@ def splat_args(fn:Callable[[*_Ts], _T], args: Tuple[*_Ts]) -> _T:
 @app.callback()
 def main(
     path: Path = Argument(..., exists=True, dir_okay=True, allow_dash=False),
+    more_paths: list[Path] = Argument(..., exists=True, dir_okay=True, allow_dash=False),
     disable: List[Rule] = Option(default=[], help="Disable a rule."),
     diff: bool = Option(False, help="Show diff instead of applying changes."),
     ignore: List[str] = Option(default=DEFAULT_IGNORES, help="Ignore a path glob pattern."),
@@ -119,6 +120,12 @@ def main(
     else:
         package = path
         all_files = sorted(package.glob("**/*.py"))
+
+    for p in more_paths:
+        if os.path.isfile(p):
+            all_files.append(p)
+        else:
+            all_files.extend(sorted(p.glob("**/*.py")))
 
     filtered_files = [file for file in all_files if not any(match_glob(file, pattern) for pattern in ignore)]
     files = [str(file.relative_to(".")) for file in filtered_files]
