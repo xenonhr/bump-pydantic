@@ -93,6 +93,8 @@ def main(
     process_single_file: Optional[Path] = Option(default=None, help="Process a single file."),
     processes: Optional[int] = Option(default=os.cpu_count(), help="Maximum number of processes to use."),
     batch_size: int = Option(default=40, help="Number of files to process in a batch."),
+    shard_count: Optional[int] = Option(default=None),
+    shard_index: Optional[int] = Option(default=None),
     version: bool = Option(
         None,
         "--version",
@@ -193,7 +195,20 @@ def main(
     partial_run_codemods_batched = functools.partial(run_codemods_batched, codemods, metadata_manager, scratch, package, diff)
 
     difflines: List[List[str]] = []
-    files_to_process = [str(process_single_file.relative_to("."))] if process_single_file else files
+    if process_single_file:
+        files_to_process: List[str] = [str(process_single_file.relative_to("."))]
+    elif shard_count is not None:
+        if shard_index is None:
+            console.log("Need to pass shard_index if shard_count is set.")
+            raise Exit(2)
+        shard_size = len(files) // shard_count
+        if shard_index < shard_count - 1:
+            files_to_process = files[shard_size * shard_index:shard_size * (shard_index + 1)]
+        else:
+            # last shard gets the remainder
+            files_to_process = files[shard_size * shard_index:]
+    else:
+        files_to_process = files
     with Progress(*Progress.get_default_columns(), transient=True, disable=bool(process_single_file)) as progress:
         task = progress.add_task(description="Executing codemods...", total=len(files_to_process))
         with multiprocessing.Pool(processes=processes) as pool:
