@@ -149,7 +149,13 @@ def main(
 
     scratch: dict[str, Any] = {}
     scan_needed = True
-    if (package / ".pyre_configuration").exists():
+    def has_pyre_config(p: Path) -> bool:
+        p = p.resolve()
+        while not (has_config := (p / ".pyre_configuration").exists()) and (p.parent != p):
+            p = p.parent
+        return has_config
+
+    if has_pyre_config(package):
         console.log("Found .pyre_configuration file. Using Pyre to find class families.")
         try:
             families = [
