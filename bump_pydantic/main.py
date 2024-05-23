@@ -85,7 +85,7 @@ def splat_args(fn:Callable[[*_Ts], _T], args: Tuple[*_Ts]) -> _T:
 @app.callback()
 def main(
     path: Path = Argument(..., exists=True, dir_okay=True, allow_dash=False),
-    more_paths: list[Path] = Argument(..., exists=True, dir_okay=True, allow_dash=False),
+    more_paths: list[Path] = Argument(default=[], exists=True, dir_okay=True, allow_dash=False),
     disable: List[Rule] = Option(default=[], help="Disable a rule."),
     diff: bool = Option(False, help="Show diff instead of applying changes."),
     ignore: List[str] = Option(default=DEFAULT_IGNORES, help="Ignore a path glob pattern."),
