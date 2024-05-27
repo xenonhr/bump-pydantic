@@ -5,7 +5,7 @@ import re
 import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
-from libcst.metadata import FullyQualifiedNameProvider, NonCachedTypeInferenceProvider
+from libcst.metadata import FullyQualifiedNameProvider, LazyTypeInferenceProvider
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
@@ -32,7 +32,7 @@ INCLUDE_EXCLUDE_COMMENT = "see https://docs.pydantic.dev/latest/api/base_model/#
 
 class ReplaceModelAttributeAccessCommand(VisitorBasedCodemodCommand):
 
-    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, NonCachedTypeInferenceProvider)
+    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, LazyTypeInferenceProvider)
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
@@ -44,7 +44,7 @@ class ReplaceModelAttributeAccessCommand(VisitorBasedCodemodCommand):
     def leave_model_attr(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.Attribute:
         obj = original_node.value
         old_attr = original_node.attr.value
-        fqn = self.get_metadata(NonCachedTypeInferenceProvider, obj, None)
+        fqn = self.get_metadata(LazyTypeInferenceProvider, obj, None)
         if not fqn:
             # We don't know what this is! Warn?
             return updated_node

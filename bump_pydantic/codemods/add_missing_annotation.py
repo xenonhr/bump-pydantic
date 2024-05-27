@@ -6,7 +6,7 @@ import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor
-from libcst.metadata import FullyQualifiedNameProvider, NonCachedTypeInferenceProvider
+from libcst.metadata import FullyQualifiedNameProvider, LazyTypeInferenceProvider
 
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
@@ -20,7 +20,7 @@ MEMBER_ASSIGN_ANCESTORS = [m.ClassDef(), m.IndentedBlock(), m.SimpleStatementLin
 
 class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
 
-    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, NonCachedTypeInferenceProvider)
+    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider, LazyTypeInferenceProvider)
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
@@ -57,8 +57,8 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
             annotation = cst.Name("bool")
         elif m.matches(updated_node.value, m.Float()):
             annotation = cst.Name("float")
-        elif (fqn := self.get_metadata(NonCachedTypeInferenceProvider, original_node.value, None)) and fqn != "typing.Any":
-            if fqn.startswith("typing.Type[") and fqn == self.get_metadata(NonCachedTypeInferenceProvider, original_node.targets[0].target, None) and isinstance(original_node.value, (cst.Name, cst.Attribute)):
+        elif (fqn := self.get_metadata(LazyTypeInferenceProvider, original_node.value, None)) and fqn != "typing.Any":
+            if fqn.startswith("typing.Type[") and fqn == self.get_metadata(LazyTypeInferenceProvider, original_node.targets[0].target, None) and isinstance(original_node.value, (cst.Name, cst.Attribute)):
                 # It's probably a `my_field = MyClass` case. Then we can use the class as written instead
                 # of the fqn.
                 annotation = cst.Subscript(value=cst.Name("Type"), slice=[cst.SubscriptElement(slice=cst.Index(value=original_node.value))])
@@ -68,7 +68,7 @@ class AddMissingAnnotationCommand(VisitorBasedCodemodCommand):
                 pass
             else:
                 model_name = cst.ensure_type(ancestors[0], cst.ClassDef).name
-                model_type_fqn = self.get_metadata(NonCachedTypeInferenceProvider, model_name, None)
+                model_type_fqn = self.get_metadata(LazyTypeInferenceProvider, model_name, None)
                 model_fqn = (match := re.match(r"typing.Type\[(.*)\]", model_type_fqn or "")) and match[1]
                 if model_fqn and "." in model_fqn:
                     prefix = model_fqn.rsplit(".", 1)[0]

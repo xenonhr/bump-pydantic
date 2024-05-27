@@ -31,7 +31,7 @@ from libcst.metadata import (
     FilePathProvider,
     FullRepoManager,
     FullyQualifiedNameProvider,
-    NonCachedTypeInferenceProvider,
+    LazyTypeInferenceProvider,
     ScopeProvider,
 )
 from rich.console import Console
@@ -53,7 +53,7 @@ T = TypeVar("T")
 
 DEFAULT_IGNORES = [".venv/**", ".tox/**", ".git/**"]
 
-PyreData = NonCachedTypeInferenceProvider.PyreData
+PyreData = LazyTypeInferenceProvider.PyreData
 
 def version_callback(value: bool):
     if value:
@@ -73,7 +73,7 @@ def path_for_pyre(path: str) -> str:
 def path_and_pyre_data(paths: Iterable[str], query_batch_size: int) -> Iterable[tuple[str, PyreData|None]]:
     it = iter(paths)
     while (batch := list(itertools.islice(it, query_batch_size))):
-        path_data = NonCachedTypeInferenceProvider.query_batch([path_for_pyre(f) for f in batch])
+        path_data = LazyTypeInferenceProvider.query_batch([path_for_pyre(f) for f in batch])
         for path in batch:
             yield path, path_data.get(path_for_pyre(path))
 
@@ -310,7 +310,7 @@ def run_codemods_batched(
 ) -> Tuple[list[str], list[list[str]]]:
     errors: list[str] = []
     diffs: List[List[str]] = []
-    NonCachedTypeInferenceProvider.cache_batch(NonCachedTypeInferenceProvider.query_batch([path_for_pyre(f) for f in filenames]))
+    LazyTypeInferenceProvider.cache_batch(LazyTypeInferenceProvider.query_batch([path_for_pyre(f) for f in filenames]))
     for filename in filenames:
         one_error, one_difflines = run_codemods(codemods, metadata_manager, scratch, package, diff, filename)
 
@@ -332,7 +332,7 @@ def run_codemods(
     pyre_data: Optional[PyreData] = None,
 ) -> Tuple[str | None, List[str] | None]:
     if pyre_data is not None:
-        NonCachedTypeInferenceProvider.cache_batch({path_for_pyre(filename): pyre_data})
+        LazyTypeInferenceProvider.cache_batch({path_for_pyre(filename): pyre_data})
     try:
         module_and_package = calculate_module_and_package(str(package), filename)
         context = CodemodContext(
