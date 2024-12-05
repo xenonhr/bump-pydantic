@@ -12,33 +12,67 @@ There are two objects in the visitor:
 
 from __future__ import annotations
 
+import dataclasses
 from collections import defaultdict
-from typing import Set, cast
 
 import libcst as cst
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
-from libcst.metadata import FullyQualifiedNameProvider, QualifiedName
+from libcst.metadata import FullyQualifiedNameProvider, QualifiedName, QualifiedNameProvider
 
+
+@dataclasses.dataclass
+class PendingClass:
+    pending_bases: set[str] = dataclasses.field(default_factory=set)
+    subclasses: set[str] = dataclasses.field(default_factory=set)
+
+@dataclasses.dataclass
+class ClassCategory:
+    known_members: set[str] = dataclasses.field(default_factory=set)
+    known_non_members: set[str] = dataclasses.field(default_factory=set)
+    pending: dict[str, PendingClass] = dataclasses.field(default_factory=lambda: defaultdict(PendingClass))
+
+    def mark_as_member(self, fqn: str) -> None:
+        self.known_members.add(fqn)
+        if fqn in self.pending:
+            pending_info = self.pending.pop(fqn)
+            for subclass_fqn in pending_info.subclasses:
+                self.mark_as_member(subclass_fqn)
+
+    def mark_as_non_member(self, fqn: str) -> None:
+        self.known_non_members.add(fqn)
+        if fqn in self.pending:
+            pending_info = self.pending.pop(fqn)
+            for subclass_fqn in pending_info.subclasses:
+                if subclass_fqn not in self.pending:
+                    continue
+                sub_info = self.pending[subclass_fqn]
+                sub_info.pending_bases.discard(fqn)
+                if not sub_info.pending_bases:
+                    self.mark_as_non_member(subclass_fqn)
 
 class ClassDefVisitor(VisitorBasedCodemodCommand):
-    METADATA_DEPENDENCIES = {FullyQualifiedNameProvider}
+    METADATA_DEPENDENCIES = {FullyQualifiedNameProvider, QualifiedNameProvider}
 
     BASE_MODEL_CONTEXT_KEY = "base_model_cls"
-    NO_BASE_MODEL_CONTEXT_KEY = "no_base_model_cls"
-    CLS_CONTEXT_KEY = "cls"
+    ORMAR_MODEL_CONTEXT_KEY = "ormar_model_cls"
+    ORMAR_META_CONTEXT_KEY = "ormar_model_meta_cls"
 
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
-        self.module_fqn: None | QualifiedName = None
 
-        self.context.scratch.setdefault(
-            self.BASE_MODEL_CONTEXT_KEY,
-            {"pydantic.BaseModel", "pydantic.main.BaseModel"},
-        )
-        self.context.scratch.setdefault(self.NO_BASE_MODEL_CONTEXT_KEY, set())
-        self.context.scratch.setdefault(self.CLS_CONTEXT_KEY, defaultdict(set))
+        self.categories = list[ClassCategory]()
+        self.categories.append(self.context.scratch.setdefault(self.BASE_MODEL_CONTEXT_KEY,
+            ClassCategory(known_members={"pydantic.BaseModel", "pydantic.main.BaseModel"})))
+        self.categories.append(self.context.scratch.setdefault(self.ORMAR_MODEL_CONTEXT_KEY,
+            ClassCategory(known_members={"ormar.Model"})))
+        self.categories.append(self.context.scratch.setdefault(self.ORMAR_META_CONTEXT_KEY,
+            ClassCategory(known_members={"ormar.ModelMeta"})))
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        for category in self.categories:
+            self.update_membership(node, category)
+
+    def update_membership(self, node: cst.ClassDef, category: ClassCategory) -> None:
         fqn_set = self.get_metadata(FullyQualifiedNameProvider, node)
 
         if not fqn_set:
@@ -47,55 +81,28 @@ class ClassDefVisitor(VisitorBasedCodemodCommand):
         fqn: QualifiedName = next(iter(fqn_set))  # type: ignore
 
         if not node.bases:
-            self.context.scratch[self.NO_BASE_MODEL_CONTEXT_KEY].add(fqn.name)
+            category.mark_as_non_member(fqn.name)
+            return
 
+        has_model_base = False
+        unknown_bases: list[QualifiedName] = []
         for arg in node.bases:
-            base_fqn_set = self.get_metadata(FullyQualifiedNameProvider, arg.value)
-            base_fqn_set = base_fqn_set or set()
+            base_fqn_set = self.get_metadata(FullyQualifiedNameProvider, arg.value, set())
+            for base_fqn in base_fqn_set:
+                if base_fqn.name in category.known_members:
+                    has_model_base = True
+                    break
+                elif base_fqn.name not in category.known_non_members:
+                    unknown_bases.append(base_fqn)
 
-            for base_fqn in cast(Set[QualifiedName], iter(base_fqn_set)):  # type: ignore
-                if base_fqn.name in self.context.scratch[self.BASE_MODEL_CONTEXT_KEY]:
-                    self.context.scratch[self.BASE_MODEL_CONTEXT_KEY].add(fqn.name)
-                elif base_fqn.name in self.context.scratch[self.NO_BASE_MODEL_CONTEXT_KEY]:
-                    self.context.scratch[self.NO_BASE_MODEL_CONTEXT_KEY].add(fqn.name)
-
-            # In case we have the following scenario:
-            # class A(B): ...
-            # class B(BaseModel): ...
-            # class D(C): ...
-            # class C: ...
-            # We want to disambiguate `A` as soon as we see `B` is a `BaseModel`.
-            if (
-                fqn.name in self.context.scratch[self.BASE_MODEL_CONTEXT_KEY]
-                and fqn.name in self.context.scratch[self.CLS_CONTEXT_KEY]
-            ):
-                for parent_class in self.context.scratch[self.CLS_CONTEXT_KEY].pop(fqn.name):
-                    self.context.scratch[self.BASE_MODEL_CONTEXT_KEY].add(parent_class)
-
-            # In case we have the following scenario:
-            # class A(B): ...
-            # class B(BaseModel): ...
-            # class D(C): ...
-            # class C: ...
-            # We want to disambiguate `D` as soon as we see `C` is NOT a `BaseModel`.
-            if (
-                fqn.name in self.context.scratch[self.NO_BASE_MODEL_CONTEXT_KEY]
-                and fqn.name in self.context.scratch[self.CLS_CONTEXT_KEY]
-            ):
-                for parent_class in self.context.scratch[self.CLS_CONTEXT_KEY].pop(fqn.name):
-                    self.context.scratch[self.NO_BASE_MODEL_CONTEXT_KEY].add(parent_class)
-
-            # In case we have the following scenario:
-            # class A(B): ...
-            # ...And B is not known.
-            # We want to make sure that B -> A is added to the `cls` context, so if we find B later,
-            # we can disambiguate.
-            if fqn.name not in (
-                *self.context.scratch[self.BASE_MODEL_CONTEXT_KEY],
-                *self.context.scratch[self.NO_BASE_MODEL_CONTEXT_KEY],
-            ):
-                for base_fqn in cast(Set[QualifiedName], base_fqn_set):
-                    self.context.scratch[self.CLS_CONTEXT_KEY][base_fqn.name].add(fqn.name)
+        if has_model_base:
+            category.mark_as_member(fqn.name)
+        elif not unknown_bases:
+            category.mark_as_non_member(fqn.name)
+        else:
+            category.pending[fqn.name].pending_bases = {base_fqn.name for base_fqn in unknown_bases}
+            for base_fqn in unknown_bases:
+                category.pending[base_fqn.name].subclasses.add(fqn.name)
 
     # TODO: Implement this if needed...
     def next_file(self, visited: set[str]) -> str | None:
@@ -144,5 +151,3 @@ if __name__ == "__main__":
         command = ClassDefVisitor(context=context)
         mod = wrapper.visit(command)
         pprint(context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY])
-        pprint(context.scratch[ClassDefVisitor.NO_BASE_MODEL_CONTEXT_KEY])
-        pprint(context.scratch[ClassDefVisitor.CLS_CONTEXT_KEY])

@@ -44,14 +44,17 @@ IMPORT_FIELD = m.Module(
     ]
 )
 
+def m_name_or_pydantic_attr(name: str) -> m.OneOf[m.BaseExpressionMatchType]:
+    return m.Name(name) | m.Attribute(attr=m.Name(name), value=m.Name("pydantic"))
+
 ANN_ASSIGN_WITH_FIELD = m.AnnAssign(
-    value=m.Call(func=m.Name("Field")),
+    value=m.Call(func=m_name_or_pydantic_attr("Field")),
 ) | m.AnnAssign(
     annotation=m.Annotation(
         annotation=m.Subscript(
             slice=[
                 m.ZeroOrMore(),
-                m.SubscriptElement(slice=m.Index(value=m.Call(func=m.Name("Field")))),
+                m.SubscriptElement(slice=m.Index(value=m.Call(func=m_name_or_pydantic_attr("Field")))),
                 m.ZeroOrMore(),
             ]
         )
@@ -99,16 +102,16 @@ class FieldCodemod(VisitorBasedCodemodCommand):
             value=self._const.value,
         )
 
-    @m.visit(m.Call(func=m.Name("Field")))
+    @m.visit(m.Call(func=m_name_or_pydantic_attr("Field")))
     def visit_field_call(self, node: cst.Call) -> None:
         # Check if there's a `const=True` argument.
         const_arg = m.Arg(value=m.Name("True"), keyword=m.Name("const"))
-        if m.matches(node, m.Call(func=m.Name("Field"), args=[~m.Arg(value=m.Name("...")), const_arg])):
+        if m.matches(node, m.Call(func=m_name_or_pydantic_attr("Field"), args=[~m.Arg(value=m.Name("...")), const_arg])):
             self._const = node.args[0]
 
-    @m.leave(m.Call(func=m.Name("Field")))
+    @m.leave(m.Call(func=m_name_or_pydantic_attr("Field")))
     def leave_field_call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
-        if not self.has_field_import or not self.inside_field_assign:
+        if not self.inside_field_assign or (isinstance(original_node.func, cst.Name) and not self.has_field_import):
             return updated_node
 
         new_args: List[cst.Arg] = []

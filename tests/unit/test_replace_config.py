@@ -1,13 +1,50 @@
-import pytest
-from libcst.codemod import CodemodTest
+from typing import Any
 
+import pytest
+from libcst import MetadataWrapper, parse_module
+from libcst.codemod import CodemodContext, CodemodTest
+from libcst.metadata import FullRepoManager
+
+from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 from bump_pydantic.codemods.replace_config import ReplaceConfigCodemod
 
+DEFAULT_PATH = "foo.py"
 
 class TestReplaceConfigCommand(CodemodTest):
     TRANSFORM = ReplaceConfigCodemod
 
     maxDiff = None
+
+    def setUp(self) -> None:
+        scratch = {}
+        providers = [*self.TRANSFORM.METADATA_DEPENDENCIES, *ClassDefVisitor.METADATA_DEPENDENCIES]
+        metadata_manager = FullRepoManager(".", [DEFAULT_PATH], providers=providers)  # type: ignore[arg-type]
+        metadata_manager.resolve_cache()
+        context = CodemodContext(
+            metadata_manager=metadata_manager,
+            filename=DEFAULT_PATH,
+            # full_module_name=module_and_package.name,
+            # full_package_name=module_and_package.package,
+            scratch=scratch,
+        )
+
+        self.context = context
+        return super().setUp()
+
+    def assertCodemod(
+        self,
+        before: str,
+        after: str,
+        *args: Any,
+        **kwargs: Any) -> None:
+        mod = MetadataWrapper(
+            parse_module(CodemodTest.make_fixture_data(before)), True,
+            cache=self.context.metadata_manager.get_cache_for_path(DEFAULT_PATH),
+        )
+        instance = ClassDefVisitor(context=self.context)
+        mod.visit(instance)
+        super().assertCodemod(before, after, *args, context_override=self.context, **kwargs)
+
 
     def test_config(self) -> None:
         before = """
@@ -35,7 +72,6 @@ class TestReplaceConfigCommand(CodemodTest):
         """
         self.assertCodemod(code, code)
 
-    @pytest.mark.xfail(reason="Not implemented yet")
     def test_noop_config_with_bases(self) -> None:
         code = """
         from potato import RandomBase
@@ -192,21 +228,52 @@ class TestReplaceConfigCommand(CodemodTest):
         """
         self.assertCodemod(before, after)
 
+    def test_allow_mutation(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            class Config:
+                allow_mutation = False
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_config = ConfigDict(frozen=True)
+        """
+        self.assertCodemod(before, after)
+
+    def test_allow_mutation_redundant(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            class Config:
+                allow_mutation = False
+                frozen = True
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_config = ConfigDict(frozen=True)
+        """
+        self.assertCodemod(before, after)
+
     def test_removed_keys(self) -> None:
         before = """
         from pydantic import BaseModel
 
         class Potato(BaseModel):
             class Config:
-                allow_mutation = True
+                underscore_attrs_are_private = True
         """
         after = """
         from pydantic import ConfigDict, BaseModel
 
         class Potato(BaseModel):
-            # TODO[pydantic]: The following keys were removed: `allow_mutation`.
-            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
-            model_config = ConfigDict(allow_mutation=True)
+            model_config = ConfigDict()
         """
         self.assertCodemod(before, after)
 
@@ -216,16 +283,14 @@ class TestReplaceConfigCommand(CodemodTest):
 
         class Potato(BaseModel):
             class Config:
-                allow_mutation = True
+                underscore_attrs_are_private = True
                 smart_union = True
         """
         after = """
         from pydantic import ConfigDict, BaseModel
 
         class Potato(BaseModel):
-            # TODO[pydantic]: The following keys were removed: `allow_mutation`, `smart_union`.
-            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
-            model_config = ConfigDict(allow_mutation=True, smart_union=True)
+            model_config = ConfigDict()
         """
         self.assertCodemod(before, after)
 
@@ -310,5 +375,62 @@ class TestReplaceConfigCommand(CodemodTest):
 
                 cls.Config = Config  # type: ignore
                 super().__init_subclass__(**kwargs)
+        """
+        self.assertCodemod(before, after)
+
+    def test_model_field(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            model_name: str = "potato"
+            class Config:
+                allow_arbitrary_types = True
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_name: str = "potato"
+            model_config = ConfigDict(allow_arbitrary_types=True, protected_namespaces=())
+        """
+        self.assertCodemod(before, after)
+
+    def test_model_config_field(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            model_config: str = "potato"
+
+        class Potato2:
+            model_config: str = "potato"
+        """
+        after = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            # TODO[pydantic]: Pydantic 2 reserves the name `model_config`; please rename this field.
+            # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
+            model_config: str = "potato"
+
+        class Potato2:
+            model_config: str = "potato"
+        """
+        self.assertCodemod(before, after)
+
+    def test_model_field_add_config(self) -> None:
+        before = """
+        from pydantic import BaseModel
+
+        class Potato(BaseModel):
+            model_name: str = "potato"
+        """
+        after = """
+        from pydantic import ConfigDict, BaseModel
+
+        class Potato(BaseModel):
+            model_config = ConfigDict(protected_namespaces=())
+            model_name: str = "potato"
         """
         self.assertCodemod(before, after)

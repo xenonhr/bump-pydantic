@@ -8,6 +8,10 @@ from libcst.metadata import FullyQualifiedNameProvider, QualifiedName
 from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
 
+def m_name_or_pydantic_attr(name: str) -> m.OneOf[m.BaseExpressionMatchType]:
+    return m.Name(name) | m.Attribute(attr=m.Name(name), value=m.Name("pydantic"))
+
+
 class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
     """This codemod adds the default value `None` to all fields of a pydantic model that
     are either type `Optional[T]`, `Union[T, None]` or `Any`.
@@ -39,21 +43,24 @@ class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext) -> None:
         super().__init__(context)
 
+        self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+        self.class_stack = list[cst.ClassDef]()
         self.inside_base_model = False
         self.should_add_none = False
 
+    def _inside_pydantic_model(self) -> bool:
+        if not self.class_stack:
+            return False
+        fqn_set = self.get_metadata(FullyQualifiedNameProvider, self.class_stack[-1], set())
+        return any(fqn.name in self.pydantic_model_bases for fqn in fqn_set)
+
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        fqn_set = self.get_metadata(FullyQualifiedNameProvider, node)
-
-        if not fqn_set:
-            return None
-
-        fqn: QualifiedName = next(iter(fqn_set))  # type: ignore
-        if fqn.name in self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY]:
-            self.inside_base_model = True
+        self.class_stack.append(node)
+        self.inside_base_model = self._inside_pydantic_model()
 
     def leave_ClassDef(self, original_node: cst.ClassDef, updated_node: cst.ClassDef) -> cst.ClassDef:
-        self.inside_base_model = False
+        self.class_stack.pop()
+        self.inside_base_model = self._inside_pydantic_model()
         return updated_node
 
     def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
@@ -81,7 +88,7 @@ class AddDefaultNoneCommand(VisitorBasedCodemodCommand):
         if self.inside_base_model and self.should_add_none:
             if updated_node.value is None:
                 updated_node = updated_node.with_changes(value=cst.Name("None"))
-            elif m.matches(updated_node.value, m.Call(func=m.Name("Field"))):
+            elif m.matches(updated_node.value, m.Call(func=m_name_or_pydantic_attr("Field"))):
                 assert isinstance(updated_node.value, cst.Call)
                 args = updated_node.value.args
                 if args:

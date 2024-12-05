@@ -17,6 +17,9 @@ import libcst as cst
 import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor
+from libcst.metadata import FullyQualifiedNameProvider
+
+from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
 
 IMPORTS = {
     "pydantic:BaseSettings": ("pydantic_settings", "BaseSettings"),
@@ -32,6 +35,8 @@ IMPORTS = {
         "pydantic_extra_types.payment",
         "PaymentCardNumber",
     ),
+    "typing:TypedDict": ("typing_extensions", "TypedDict"),
+    "pydantic.error_wrappers:ValidationError": ("pydantic", "ValidationError"),
 }
 
 
@@ -96,10 +101,28 @@ IMPORT_MATCH = m.OneOf(*[info.import_from for info in IMPORT_INFOS])
 
 
 class ReplaceImportsCodemod(VisitorBasedCodemodCommand):
+
+    METADATA_DEPENDENCIES = (FullyQualifiedNameProvider,)
+
+    def __init__(self, context: CodemodContext) -> None:
+        super().__init__(context)
+        self.pydantic_model_bases = self.context.scratch[ClassDefVisitor.BASE_MODEL_CONTEXT_KEY].known_members
+
+    def _is_pydantic_model(self, node: cst.CSTNode) -> bool:
+        fqn_set = self.get_metadata(FullyQualifiedNameProvider, node, set())
+        return any(fqn.name in self.pydantic_model_bases for fqn in fqn_set)
+
+    def visit_Module(self, node: cst.Module) -> None:
+        match_pydantic_model = m.ClassDef() & m.MatchIfTrue(self._is_pydantic_model)
+        self.has_pydantic_model = bool(m.findall(node, match_pydantic_model))
+
     @m.leave(IMPORT_MATCH)
     def leave_replace_import(self, _: cst.ImportFrom, updated_node: cst.ImportFrom) -> cst.ImportFrom:
         for import_info in IMPORT_INFOS:
             if m.matches(updated_node, import_info.import_from):
+                # We only need to replace TypedDict if we have a pydantic model in the file.
+                if import_info.to_import_str[1] == "TypedDict" and not self.has_pydantic_model:
+                    break
                 aliases: Sequence[cst.ImportAlias] = updated_node.names  # type: ignore
                 # If multiple objects are imported in a single import statement,
                 # we need to remove only the one we're replacing.

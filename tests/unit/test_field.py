@@ -34,7 +34,6 @@ class TestFieldCommand(CodemodTest):
         """
         self.assertCodemod(code, code)
 
-    @pytest.mark.xfail(reason="Not implemented yet")
     def test_field_rename_with_pydantic_import(self) -> None:
         before = """
         import pydantic
@@ -43,7 +42,7 @@ class TestFieldCommand(CodemodTest):
             potato: List[int] = pydantic.Field(..., min_items=1, max_items=10)
         """
         after = """
-        from pydantic import BaseModel, Field
+        import pydantic
 
         class Potato(pydantic.BaseModel):
             potato: List[int] = pydantic.Field(..., min_length=1, max_length=10)

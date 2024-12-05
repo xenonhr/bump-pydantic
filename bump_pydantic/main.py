@@ -1,18 +1,40 @@
 import difflib
 import functools
+import itertools
+import json
 import multiprocessing
 import os
 import platform
+import subprocess
 import time
 import traceback
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    TypeVarTuple,
+    Unpack,
+)
 
 import libcst as cst
 from libcst.codemod import CodemodContext, ContextAwareTransformer
 from libcst.helpers import calculate_module_and_package
-from libcst.metadata import FullRepoManager, FullyQualifiedNameProvider, ScopeProvider
+from libcst.metadata import (
+    FilePathProvider,
+    FullRepoManager,
+    FullyQualifiedNameProvider,
+    LazyTypeInferenceProvider,
+    ScopeProvider,
+)
 from rich.console import Console
 from rich.progress import Progress
 from typer import Argument, Exit, Option, Typer, echo
@@ -20,7 +42,7 @@ from typing_extensions import ParamSpec
 
 from bump_pydantic import __version__
 from bump_pydantic.codemods import Rule, gather_codemods
-from bump_pydantic.codemods.class_def_visitor import ClassDefVisitor
+from bump_pydantic.codemods.class_def_visitor import ClassCategory, ClassDefVisitor
 from bump_pydantic.glob_helpers import match_glob
 
 app = Typer(invoke_without_command=True, add_completion=False)
@@ -30,27 +52,50 @@ entrypoint = functools.partial(app, windows_expand_args=False)
 P = ParamSpec("P")
 T = TypeVar("T")
 
-DEFAULT_IGNORES = [".venv/**", ".tox/**"]
+DEFAULT_IGNORES = [".venv/**", ".tox/**", ".git/**"]
 
-processes = os.cpu_count()
-# Windows has a limit of 61 processes. See https://github.com/python/cpython/issues/89240.
-if platform.system() == "Windows" and processes is not None:
-    processes = min(processes, 61)
-
+PyreData = LazyTypeInferenceProvider.PyreData
 
 def version_callback(value: bool):
     if value:
         echo(f"bump-pydantic version: {__version__}")
         raise Exit()
 
+_T = TypeVar("_T")
+
+def batch_iterator(iterable:Iterable[_T], n:int) -> Iterable[List[_T]]:
+    it = iter(iterable)
+    while (batch := list(itertools.islice(it, n))):
+        yield batch
+
+def path_for_pyre(path: str) -> str:
+    return str(Path(path).resolve())
+
+def path_and_pyre_data(paths: Iterable[str], query_batch_size: int) -> Iterable[tuple[str, PyreData|None]]:
+    it = iter(paths)
+    while (batch := list(itertools.islice(it, query_batch_size))):
+        path_data = LazyTypeInferenceProvider.query_batch([path_for_pyre(f) for f in batch])
+        for path in batch:
+            yield path, path_data.get(path_for_pyre(path))
+
+_Ts = TypeVarTuple("_Ts")
+
+def splat_args(fn:Callable[Unpack[_Ts], _T], args: Tuple[Unpack[_Ts]]) -> _T:
+    return fn(*args)
 
 @app.callback()
 def main(
     path: Path = Argument(..., exists=True, dir_okay=True, allow_dash=False),
+    # more_paths: list[Path] = Argument(default=[], exists=True, dir_okay=True, allow_dash=False),
     disable: List[Rule] = Option(default=[], help="Disable a rule."),
     diff: bool = Option(False, help="Show diff instead of applying changes."),
     ignore: List[str] = Option(default=DEFAULT_IGNORES, help="Ignore a path glob pattern."),
     log_file: Path = Option("log.txt", help="Log errors to this file."),
+    process_single_file: Optional[Path] = Option(default=None, help="Process a single file."),
+    processes: Optional[int] = Option(default=os.cpu_count(), help="Maximum number of processes to use."),
+    batch_size: int = Option(default=40, help="Number of files to process in a batch."),
+    shard_count: Optional[int] = Option(default=None),
+    shard_index: Optional[int] = Option(default=None),
     version: bool = Option(
         None,
         "--version",
@@ -68,12 +113,22 @@ def main(
     # NOTE: LIBCST_PARSER_TYPE=native is required according to https://github.com/Instagram/LibCST/issues/487.
     os.environ["LIBCST_PARSER_TYPE"] = "native"
 
+    # Windows has a limit of 61 processes. See https://github.com/python/cpython/issues/89240.
+    if platform.system() == "Windows" and processes is not None:
+        processes = min(processes, 61)
+
     if os.path.isfile(path):
         package = path.parent
         all_files = [path]
     else:
         package = path
         all_files = sorted(package.glob("**/*.py"))
+
+    # for p in more_paths:
+    #     if os.path.isfile(p):
+    #         all_files.append(p)
+    #     else:
+    #         all_files.extend(sorted(p.glob("**/*.py")))
 
     filtered_files = [file for file in all_files if not any(match_glob(file, pattern) for pattern in ignore)]
     files = [str(file.relative_to(".")) for file in filtered_files]
@@ -86,62 +141,91 @@ def main(
         console.log("No files to process.")
         raise Exit()
 
-    providers = {FullyQualifiedNameProvider, ScopeProvider}
-    metadata_manager = FullRepoManager(".", files, providers=providers)  # type: ignore[arg-type]
+    # Note: we do _not_ cache TypeInferenceProvider because it takes forever and will eventually cause an OOM.
+    # It's silly to cache all type inferences for the entire repo.
+    providers = {FullyQualifiedNameProvider, ScopeProvider, FilePathProvider}
+    metadata_manager = FullRepoManager(".", files, providers=providers, timeout=3600)  # type: ignore[arg-type]
     metadata_manager.resolve_cache()
 
+    count_errors = 0
+    log_fp = log_file.open("a+", encoding="utf8")
+
     scratch: dict[str, Any] = {}
-    with Progress(*Progress.get_default_columns(), transient=True) as progress:
-        task = progress.add_task(description="Looking for Pydantic Models...", total=len(files))
-        queue = deque(files)
-        visited: Set[str] = set()
+    scan_needed = True
+    def has_pyre_config(p: Path) -> bool:
+        p = p.resolve()
+        while not (has_config := (p / ".pyre_configuration").exists()) and (p.parent != p):
+            p = p.parent
+        return has_config
 
-        while queue:
-            # Queue logic
-            filename = queue.popleft()
-            visited.add(filename)
-            progress.advance(task)
+    if has_pyre_config(package):
+        console.log("Found .pyre_configuration file. Using Pyre to find class families.")
+        try:
+            families = [
+                (ClassDefVisitor.BASE_MODEL_CONTEXT_KEY, {"pydantic.BaseModel", "pydantic.main.BaseModel"}),
+                (ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY, {"ormar.Model", "ormar.models.model.Model"}),
+                (ClassDefVisitor.ORMAR_META_CONTEXT_KEY, {"ormar.ModelMeta", "ormar.models.metaclass.ModelMeta"}),
+            ]
+            class_sets = find_class_families_using_pyre([f[1] for f in families])
+            for (key, _), class_set in zip(families, class_sets):
+                scratch[key] = ClassCategory(known_members=class_set)
+            scan_needed = False
+        except Exception as e:
+            console.log(f"Failed to use Pyre to find class families: {e}")
+    if scan_needed:
+        for error in scan_for_classes(files, metadata_manager, scratch, package):
+            count_errors += 1
+            log_fp.writelines(error)
 
-            # Visitor logic
-            code = Path(filename).read_text(encoding="utf8")
-            module = cst.parse_module(code)
-            module_and_package = calculate_module_and_package(str(package), filename)
-
-            context = CodemodContext(
-                metadata_manager=metadata_manager,
-                filename=filename,
-                full_module_name=module_and_package.name,
-                full_package_name=module_and_package.package,
-                scratch=scratch,
-            )
-            visitor = ClassDefVisitor(context=context)
-            visitor.transform_module(module)
-
-            # Queue logic
-            next_file = visitor.next_file(visited)
-            if next_file is not None:
-                queue.appendleft(next_file)
+    for name, key in [
+        ("pydantic_models.txt", ClassDefVisitor.BASE_MODEL_CONTEXT_KEY),
+        ("ormar_models.txt", ClassDefVisitor.ORMAR_MODEL_CONTEXT_KEY),
+        ("ormar_meta.txt", ClassDefVisitor.ORMAR_META_CONTEXT_KEY),
+    ]:
+        console.log(f"Found {len(scratch[key].known_members)} members of {key}.")
+        with open(name, "w") as f:
+            for fqn in sorted(scratch[key].known_members):
+                f.write(f"{fqn}\n")
 
     start_time = time.time()
 
     codemods = gather_codemods(disabled=disable)
 
-    log_fp = log_file.open("a+", encoding="utf8")
     partial_run_codemods = functools.partial(run_codemods, codemods, metadata_manager, scratch, package, diff)
-    with Progress(*Progress.get_default_columns(), transient=True) as progress:
-        task = progress.add_task(description="Executing codemods...", total=len(files))
-        count_errors = 0
-        difflines: List[List[str]] = []
+    partial_run_codemods_with_pyre_data = functools.partial(splat_args, partial_run_codemods)
+    partial_run_codemods_batched = functools.partial(run_codemods_batched, codemods, metadata_manager, scratch, package, diff)
+
+    difflines: List[List[str]] = []
+    if process_single_file:
+        files_to_process: List[str] = [str(process_single_file.relative_to("."))]
+    elif shard_count is not None:
+        if shard_index is None:
+            console.log("Need to pass shard_index if shard_count is set.")
+            raise Exit(2)
+        shard_size = len(files) // shard_count
+        if shard_index < shard_count - 1:
+            files_to_process = files[shard_size * shard_index:shard_size * (shard_index + 1)]
+        else:
+            # last shard gets the remainder
+            files_to_process = files[shard_size * shard_index:]
+    else:
+        files_to_process = files
+    with Progress(*Progress.get_default_columns(), transient=True, disable=bool(process_single_file)) as progress:
+        task = progress.add_task(description="Executing codemods...", total=len(files_to_process))
         with multiprocessing.Pool(processes=processes) as pool:
-            for error, _difflines in pool.imap_unordered(partial_run_codemods, files):
-                progress.advance(task)
-
-                if _difflines is not None:
-                    difflines.append(_difflines)
-
-                if error is not None:
-                    count_errors += 1
-                    log_fp.writelines(error)
+            # for one_error, one_difflines in pool.imap_unordered(partial_run_codemods_with_pyre_data, path_and_pyre_data(files_to_process, batch_size)):
+            #     progress.advance(task)
+            #     if one_error is not None:
+            #         count_errors += 1
+            #         log_fp.writelines(one_error)
+            #     if one_difflines is not None:
+            #         difflines.append(one_difflines)
+            for batch_errors, batch_diffs in pool.imap_unordered(partial_run_codemods_batched, batch_iterator(files_to_process, batch_size)):
+                progress.advance(task, batch_size)
+                difflines.extend(batch_diffs)
+                if batch_errors:
+                    count_errors += len(batch_errors)
+                    log_fp.writelines(batch_errors)
 
     modified = [Path(f) for f in files if os.stat(f).st_mtime > start_time]
 
@@ -163,6 +247,82 @@ def main(
         raise Exit(1)
 
 
+def find_class_families_using_pyre(root_sets: list[set[str]]) -> list[set[str]]:
+    families = [set(r) for r in root_sets]
+    cmd_args = ["pyre", "--noninteractive", "query", "dump_class_hierarchy()"]
+    stdout = subprocess.run(cmd_args, check=True, stdout=subprocess.PIPE).stdout
+    resp = json.loads(stdout)["response"]
+    for entry in resp:
+        for class_fqn, class_ancestors in entry.items():
+            for roots, family in zip(root_sets, families):
+                if any(a in roots for a in class_ancestors):
+                    family.add(class_fqn)
+    return families
+
+
+def scan_for_classes(files: list[str], metadata_manager: FullRepoManager, scratch: dict[str, Any], package: Path) -> list[str]:
+    errors: list[str] = []
+    with Progress(*Progress.get_default_columns(), transient=True) as progress:
+        task = progress.add_task(description="Looking for Pydantic Models...", total=len(files))
+        queue = deque(files)
+        visited: Set[str] = set()
+
+        while queue:
+            # Queue logic
+            filename = queue.popleft()
+            visited.add(filename)
+            progress.advance(task)
+
+            # Visitor logic
+            code = Path(filename).read_text(encoding="utf8")
+            try:
+                module = cst.parse_module(code)
+                module_and_package = calculate_module_and_package(str(package), filename)
+
+                context = CodemodContext(
+                    metadata_manager=metadata_manager,
+                    filename=filename,
+                    full_module_name=module_and_package.name,
+                    full_package_name=module_and_package.package,
+                    scratch=scratch,
+                )
+                visitor = ClassDefVisitor(context=context)
+                visitor.transform_module(module)
+
+                # Queue logic
+                next_file = visitor.next_file(visited)
+                if next_file is not None:
+                    queue.appendleft(next_file)
+            except Exception:
+                errors.append(f"An error happened on {filename}.\n{traceback.format_exc()}")
+                # count_errors += 1
+                # log_fp.writelines(f"An error happened on {filename}.\n{traceback.format_exc()}")
+                continue
+    return errors
+
+
+def run_codemods_batched(
+    codemods: List[Type[ContextAwareTransformer]],
+    metadata_manager: FullRepoManager,
+    scratch: Dict[str, Any],
+    package: Path,
+    diff: bool,
+    filenames: list[str],
+) -> Tuple[list[str], list[list[str]]]:
+    errors: list[str] = []
+    diffs: List[List[str]] = []
+    LazyTypeInferenceProvider.cache_batch(LazyTypeInferenceProvider.query_batch([path_for_pyre(f) for f in filenames]))
+    for filename in filenames:
+        one_error, one_difflines = run_codemods(codemods, metadata_manager, scratch, package, diff, filename)
+
+        if one_difflines is not None:
+            diffs.append(one_difflines)
+
+        if one_error is not None:
+            errors.append(one_error)
+    return errors, diffs
+
+
 def run_codemods(
     codemods: List[Type[ContextAwareTransformer]],
     metadata_manager: FullRepoManager,
@@ -170,7 +330,10 @@ def run_codemods(
     package: Path,
     diff: bool,
     filename: str,
-) -> Tuple[Union[str, None], Union[List[str], None]]:
+    pyre_data: Optional[PyreData] = None,
+) -> Tuple[str | None, List[str] | None]:
+    if pyre_data is not None:
+        LazyTypeInferenceProvider.cache_batch({path_for_pyre(filename): pyre_data})
     try:
         module_and_package = calculate_module_and_package(str(package), filename)
         context = CodemodContext(
