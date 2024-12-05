@@ -22,6 +22,7 @@ from typing import (
     Type,
     TypeVar,
     TypeVarTuple,
+    Unpack,
 )
 
 import libcst as cst
@@ -79,7 +80,7 @@ def path_and_pyre_data(paths: Iterable[str], query_batch_size: int) -> Iterable[
 
 _Ts = TypeVarTuple("_Ts")
 
-def splat_args(fn:Callable[[*_Ts], _T], args: Tuple[*_Ts]) -> _T:
+def splat_args(fn:Callable[Unpack[_Ts], _T], args: Tuple[Unpack[_Ts]]) -> _T:
     return fn(*args)
 
 @app.callback()
