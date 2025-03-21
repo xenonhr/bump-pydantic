@@ -10,6 +10,78 @@ Bump Pydantic is a tool to help you migrate your code from Pydantic V1 to V2.
 > [!NOTE]\
 > If you find bugs, please report them on the [issue tracker](https://github.com/pydantic/bump-pydantic/issues/new).
 
+## IMPORTANT - updated execution instructions
+
+1. Install system dependencies (watchman, rust)
+
+```bash
+sudo dnf install watchman  # or apt equivalent
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+exec zsh  # or bash
+```
+
+2. Switch to the target Python project and activate the project's virtualenv
+
+3. Remove the existing libcst if it's already installed
+
+```bash
+pip uninstall libcst -y
+```
+
+4. Install the python dependencies
+
+```bash
+pip install git+https://github.com/camillol/libcst.git@camillo/lazytype
+pip install pyre-check
+```
+
+5. Install `bump-pydantic`
+
+```bash
+pip install git+https://github.com/xenonhr/bump-pydantic.git@main
+```
+
+6. Initialize pyre in the project root
+
+```bash
+pyre init
+```
+
+7. Run
+
+```bash
+python -c 'import site; print(site.getsitepackages()[0])'
+```
+
+Take the resulting line, open the `.pyre_configuration` file in the project root (should have been created by pyre init)
+and add the search path:
+
+```json
+{
+  ...
+  "search_path": [
+    "the/resulting/line/from/the/command/above"
+  ]
+}
+```
+
+This is also a good time to adapt the pyre configuration, ie. adapt the source_directories (import_root and source).
+The documentation is available [here](https://pyre-check.org/docs/configuration/)
+
+8. Start the pyre server and run it to see if it works. It will probably show some typing errors in your code, etc. Just make sure it throws no module not found/file not found errors for the local imports and dependency imports.
+
+```bash
+pyre start
+pyre
+```
+
+9. Run the bump-pydantic utility
+
+```bash
+bump-pydantic --diff hemunah_core  # this only displays the diff
+bump-pydantic hemunah_core  # this applies the codemods
+```
+
 ## Table of contents
 
 - [Bump Pydantic ♻️](#bump-pydantic-️)
